@@ -10,15 +10,15 @@ Follows pi-team's separation of integration and publication:
 
 ## Preview safety gate
 
-This repository is local and the package is `private: true`. Publishing is disabled.
+This repository is private on GitHub and the package remains `private: true`. Publishing is disabled.
 The release workflow's publication jobs also require the repository variable
 `PI_MCP_RELEASE_ENABLED` to equal `true`. Neither creating these files nor running
 tests authorizes pushing, opening/merging a PR, or publishing.
 
-Before enabling publication, obtain explicit user authorization, create/verify the
+Before enabling publication, obtain explicit user authorization, verify the
 intended remote and npm identity, complete manual compatibility checks, configure
 npm trusted publishing for `.github/workflows/release.yml`, remove `private: true`
-in a reviewed PR, and explicitly enable the repository release variable. No such
+in a reviewed PR, and explicitly enable the repository release variable. The private remote and integration workflow are configured; no publication
 activation has been performed.
 
 ## Checks and versioning

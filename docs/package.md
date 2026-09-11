@@ -3,7 +3,8 @@
 ## Identity and dependency contract
 
 - Local package name: `@prjct.app/pi-mcp`; development preview `0.1.0`.
-- No remote repository has been created and no registry publication is claimed.
+- Private repository: [prjct-app/pi-mcp](https://github.com/prjct-app/pi-mcp); default/integration branch `develop`.
+- Local testing loads `build/` produced from `develop`, following pi-team. No registry publication is claimed.
 - Public Pi API baseline: `@earendil-works/pi-coding-agent@0.85.1`.
 - Official MCP client SDK: `@modelcontextprotocol/client@2.0.0`.
 - Node baseline: 22.19+; execution verified on macOS with Node 22.22.2.

@@ -7,13 +7,15 @@ prompts without opening browser tabs or executing MCP App interfaces.
 Pi **0.85.1**, MCP TypeScript SDK **2.0.0**, and Node.js **22.22.2** on macOS.
 The supported Node baseline is 22.19+. Linux is a CI target, not yet locally verified.
 
-## Try the checkout
+## Test the integration build
 
 ```sh
+git switch develop
 npm ci --ignore-scripts
 npm run check
 npm test
-pi --no-extensions -e ./index.ts
+npm run build
+pi --no-extensions -e ./build
 ```
 
 Run the last command from the checkout. `--no-extensions` prevents loading the
@@ -21,8 +23,9 @@ existing MCP adapter alongside this one. Do not register both: they expose the
 same `mcp` tool and command. This command does not change installed packages.
 The user's other trusted resources and configured model remain Pi's responsibility.
 
-A later, explicit local installation can use `pi install /absolute/path/to/pi-mcp`.
-Disable the old adapter before installing. This project does not modify Pi settings,
+Like pi-team, local integration testing loads the unpacked `build/` from `develop`.
+An explicit local installation can use `pi install /absolute/path/to/pi-mcp/build`.
+Disable the old adapter before installing; keep its credentials for rollback. This project does not modify Pi settings,
 import its predecessor's credentials, or migrate configuration automatically.
 
 ## Configuration
