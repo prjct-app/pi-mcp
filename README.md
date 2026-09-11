@@ -127,6 +127,13 @@ consent, reset connections, change configuration, or open browsers. Print/JSON
 mode cannot keep a callback alive and requires previously saved credentials. Text and supported images return inline;
 structured results are preserved as bounded JSON. MCP tool errors become Pi errors.
 
+In Pi's TUI, MCP rows show compact counts/status instead of raw JSON. Expanding
+shows bounded names/states, never discovery schemas or raw arguments/responses.
+The agent still receives the complete bounded payload and presents the useful
+answer. This is presentation, not secret redaction: RPC/print/JSON consumers and
+session data retain the original tool payload. Authorization links appear in the
+agent's reply, not as a second raw URL dump in the tool row.
+
 ## Protocol and safety
 
 - MCP revisions use dates. This implements modern **`2026-07-28`** plus the SDK's

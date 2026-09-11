@@ -7,8 +7,12 @@ predecessor MCP adapter's implementation. Its root entry only re-exports
 `src/index.ts`. `installMcp(pi, options)` is the injectable Pi boundary; protocol,
 configuration, auth, storage, and output code are separate modules. Session and
 connection state use replacement snapshots, with state re-read after awaits.
-The immutable-binding check matches pi-team. Native Pi default tool rendering
-avoids an additional TUI framework or renderer lifecycle.
+The immutable-binding check matches pi-team. Public Pi `renderCall`/`renderResult` callbacks use the host's `Text` component.
+Tool rows show bounded counts/status and expanded names, never raw schemas. The
+model-facing `content` is unchanged, and no duplicate payload is stored in `details`.
+Rendering reads current arguments from Pi's row context; theme colors are applied
+on render so invalidation does not keep stale colors. This is not a data-redaction
+boundary for RPC, saved sessions, or agent context.
 
 The package-discovery test, PTY smoke approach, contribution template, and grouped
 release tooling follow pi-team's MIT-licensed project pattern. MCP behavior is
@@ -25,6 +29,7 @@ implemented against the official SDK, not copied from `pi-mcp-adapter` internals
 | `src/auth.ts` | SDK OAuth, issuer-bound secure records, refresh coordination |
 | `src/login.ts` | Shared authorization links, transient loopback callbacks, completion notifications |
 | `src/store.ts` | Cross-process credential transaction lock, no secret payloads |
+| `src/render.ts` | Compact TUI-only presentation; schemas stay in model-facing content |
 | `src/output.ts` | Inline content, terminal-control stripping, private bounded overflow files |
 
 ## Lifecycle and concurrency

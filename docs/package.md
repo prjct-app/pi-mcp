@@ -25,6 +25,7 @@ native OS keyring binding. There are no browser or MCP Apps dependencies of our 
 | --- | --- |
 | Pi package discovery | Public `DefaultResourceLoader` finds precisely the manifest extension |
 | Pi extension loading | Public loader registers `mcp` command and tool |
+| MCP TUI rows | Public registered renderers hide schemas in collapsed/expanded views, retain model payloads, and handle errors, partial results, width and theme changes |
 | Pi TUI | Isolated real-CLI PTY smoke: load, repeated status, exit, no model calls |
 | TUI/RPC/print/JSON mode logic | API harness; no startup network or auth interaction |
 | Modern stdio | Real child server, `2026-07-28`, ten parallel calls, shared PID, teardown |
@@ -45,19 +46,18 @@ MCP conformance-suite certification is made.
 
 ## Live-check status
 
-An explicitly authorized Linear check generated a new authorization link using
-this package's own SDK client registration and OS-keyring namespace. The five-minute
-window expired without a matching callback, so standalone approval, token persistence,
-and post-approval discovery are **not yet verified live**. No browser was launched.
-A separate earlier discovery check reused the previous adapter's public token API;
-that does not establish standalone OAuth interoperability and is not a runtime dependency.
+An explicitly authorized standalone Linear check completed the user-clicked link
+and automatic callback in Pi. Modern discovery succeeded, and a fresh process
+recovered the new tokens from this package's OS-keyring namespace and connected
+again. No previous-adapter token API or browser launcher was involved. Live renewal
+of an expired token and Jira interoperability remain to be checked.
 
 ## Remaining manual verification
 
 Before replacing the current adapter:
 
 1. In an isolated Pi instance, verify Linear and Jira discovery and read-only tools.
-2. Click each provider's authorization link and verify automatic callback completion;
+2. Repeat the verified Linear link/callback flow with Jira;
    confirm the configured redirect URI and client registration method are accepted.
 3. Verify native keyring persistence across restart and token renewal on this host.
 4. Confirm behavior with real Pi RPC clients; mode guards are harness-tested, not a
