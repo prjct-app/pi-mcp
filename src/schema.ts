@@ -1,0 +1,15 @@
+import { z } from 'zod';
+
+const textMap = z.record(z.string(), z.string());
+export const ServerSchema = z.object({
+  command: z.string().min(1).optional(), args: z.array(z.string()).max(128).optional(),
+  env: textMap.optional(), cwd: z.string().optional(),
+  url: z.string().optional(), headers: textMap.optional(),
+  auth: z.enum(['oauth', 'bearer']).optional(), bearerTokenEnv: z.string().min(1).optional(),
+  oauth: z.object({ clientId: z.string().optional(), issuer: z.string().optional(), clientMetadataUrl: z.string().optional(), redirectUri: z.string().optional(), scope: z.string().optional() }).strict().optional(),
+  protocolVersion: z.enum(['auto', 'legacy', '2026-07-28']).optional(),
+  requestTimeoutMs: z.number().int().min(100).max(300000).optional(), disabled: z.boolean().optional(),
+}).strict();
+
+
+export type ServerConfig = z.infer<typeof ServerSchema>;
