@@ -22,7 +22,8 @@ implemented against the official SDK, not copied from `pi-mcp-adapter` internals
 | `src/schema.ts` | Accepted server configuration schema |
 | `src/config.ts` | Read-only source precedence, project trust, safe URL and environment handling |
 | `src/runtime.ts` | One SDK client per server, shared setup/discovery, independent calls, teardown |
-| `src/auth.ts` | Manual OAuth, issuer-bound secure records, refresh coordination |
+| `src/auth.ts` | SDK OAuth, issuer-bound secure records, refresh coordination |
+| `src/login.ts` | Shared authorization links, transient loopback callbacks, completion notifications |
 | `src/store.ts` | Cross-process credential transaction lock, no secret payloads |
 | `src/output.ts` | Inline content, terminal-control stripping, private bounded overflow files |
 
@@ -49,7 +50,8 @@ HTTP auth wall nor an outage is interpreted as a reason to launch a browser or
 fall back to another transport. `/mcp reconnect` closes the existing client and
 resets it to idle; it does not start authorization. Shutdown aborts work, closes
 all owned SDK clients/transports, waits for setup to settle, and removes overflow
-files. Each replacement Pi extension instance owns fresh state.
+files and callback listeners. Session switches also cancel pending callbacks and replace
+services, so an old approval cannot wake the replacement conversation.
 
 ## Protocol eras
 
@@ -71,16 +73,32 @@ server can use its ordinary text/structured-result fallback.
 
 ## Zero-browser boundary
 
-There is no browser-launch dependency, WebView, iframe, HTML host, widget server,
-or callback listener in this package. MCP UI metadata is not an instruction to
+There is no browser-launch dependency, WebView, iframe, HTML host, or widget server
+in this package. A transient loopback HTTP listener receives OAuth callbacks only. MCP UI metadata is not an instruction to
 fetch or execute a widget. Tools restricted to the app audience are filtered
 before discovery and invocation. Explicit resource reads can return HTML as text,
 never execute it. Normal supported image blocks remain Pi image blocks.
 
-Authentication is a user command, never an agent-tool operation. Even that command
-only displays an authorization URL and requests a manually pasted callback. No
-credentials, flow URLs, or codes are added to tool details, Pi session entries,
-or agent messages. The user's terminal/RPC host still controls its own UI handling.
+The agent tool returns a user-clickable authorization link when configured OAuth
+credentials are missing or cannot be refreshed. Ten concurrent requests share one
+link. The user alone opens it and approves. No callback URL, authorization code,
+verifier, or token is added to tool results or Pi messages. The authorization link
+itself intentionally enters the conversation so the agent can present it.
+
+The receiver validates method, Host/origin/path, and state before accepting a
+single callback. Unsolicited/wrong-state callbacks cannot consume a flow. Responses
+are plain text with no-store/no-referrer headers. On completion, the SDK exchanges
+the code and persists tokens; the runtime resets the connection and sends one
+`mcp-auth` message using public `pi.sendMessage` with `followUp`/`triggerTurn`.
+This wakes the agent to continue, but does not replay an MCP operation. Expired or
+rejected flows remain failed until an explicit `/mcp auth` retry. TUI/RPC can retain
+pending callbacks; print/JSON requires credentials established beforehand.
+
+Listeners are shared by flows using the same loopback address inside one extension.
+They close after the last flow, five-minute expiry, session switch, or shutdown.
+Browser and Pi must share a reachable loopback endpoint (forward the port for SSH).
+Separate processes contending for the port fail rather than taking it over or
+starting a second authorization. Cross-process pending-link sharing is not claimed.
 
 This is not a sandbox. A configured stdio command is trusted executable code
 and can launch programs itself. Other installed Pi extensions and Pi's own login
@@ -89,7 +107,7 @@ commands are outside this package's zero-browser guarantee.
 ## OAuth and durable storage
 
 The transport receives only the SDK's narrow bearer-provider interface. It never
-receives an interactive OAuth provider. Missing credentials fail before connecting;
+receives an interactive OAuth provider. Missing credentials are detected before connecting and produce a link;
 existing refresh credentials may be renewed without user interaction. The SDK
 owns discovery, PKCE S256, client registration, resource validation, issuer checks,
 and code exchange. Background refresh has no dynamic-registration persistence hook
@@ -102,8 +120,9 @@ version, configuration binding, schema, and issuer stamps. The namespace is
 keyring reads/writes are the only persistent secret store, with no plaintext fallback.
 Corrupt records are preserved and refused. Flow state, verifier, and discovery
 binding live only in the current five-minute flow. Callback origin/path, state,
-code cardinality, and `iss` are validated before redemption. Invalid callbacks
-consume the flow; start again explicitly.
+code cardinality, and `iss` are validated before redemption. A matching-state
+callback consumes the flow even if its code/issuer is rejected; retry explicitly.
+The receiver ignores unrelated callbacks without touching the SDK flow.
 
 In-session renewals share one promise. Across processes, credential mutations use
 an exclusive private file lock and re-read secure state after acquiring it. A
@@ -134,7 +153,7 @@ can still contain prompt injection; this is not a semantic content sandbox.
 
 ## Deliberate non-goals
 
-No UI app hosting, auto-login, external config discovery/imports, shell-evaluated
+No UI app hosting, automatic browser launch/consent, external config discovery/imports, shell-evaluated
 secrets, arbitrary JS execution, direct-tool hot registration, daemon, automatic
 credential migration, or release activation. Native Windows and network storage
 are unverified/unsupported for this preview. See `docs/package.md` for the precise

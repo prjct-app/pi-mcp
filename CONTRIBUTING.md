@@ -10,7 +10,7 @@
 - `npm run check:immutable` rejects `let` bindings under `src/`. Never capture mutable session state across an await.
 - Keep README operational; put design and compatibility details in `docs/architecture.md` and `docs/package.md`.
 - Pi-provided libraries are wildcard peer dependencies with exact tested devDependency versions.
-- Never launch browsers or execute MCP App HTML. Authentication is explicitly user-initiated.
+- Never launch browsers or execute MCP App HTML. OAuth links may be offered automatically; opening the link and granting consent belong to the user.
 - Never read real credentials or contact production MCP services in automated tests.
 - Honor Pi project trust before loading project-local server commands or configuration.
 - Test at the approved boundaries: the MCP client against local protocol fixtures, and the Pi extension tool/command/lifecycle API. Test parallel requests, cancellation, teardown, protocol compatibility, and zero browser launches there.

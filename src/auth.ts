@@ -127,7 +127,7 @@ export class OAuthManager {
   }
 
   private createProvider(account: Account, interactive: boolean): { provider: OAuthClientProvider; flow: Flow } {
-    const redirectUrl = account.config.oauth?.redirectUri ?? 'http://127.0.0.1:32187/callback';
+    const redirectUrl = this.redirectUri(account.name);
     const transient: { current: Readonly<{ verifier?: string; discovery?: OAuthDiscoveryState }> } = { current: {} };
     const flow: Flow = { provider: undefined!, state: randomBytes(32).toString('hex'), expiresAt: Date.now() + 300000 };
     const credentials = async (issuer?: string) => {
@@ -174,7 +174,7 @@ export class OAuthManager {
       redirectToAuthorization: url => {
         if (!interactive) throw new AuthRequired(account.name);
         if (safeUrl(url.href).protocol !== 'https:') throw new Error('OAuth authorization requires HTTPS');
-        flow.url = url.href; // Returned to a user command only. Never spawned, logged, or sent to the model.
+        flow.url = url.href; // Returned as a user-clickable link. Never spawned; codes and tokens stay private.
       },
       saveCodeVerifier: value => { transient.current = { ...transient.current, verifier: value }; },
       codeVerifier: () => { const verifier = transient.current.verifier; if (!verifier) throw new Error('OAuth verifier is unavailable'); return verifier; },
@@ -248,6 +248,10 @@ export class OAuthManager {
     }).finally(() => { updateAccount(account, { refresh: undefined }); });
     updateAccount(account, { refresh: work });
     return work;
+  }
+
+  redirectUri(name: string): string {
+    return this.account(name).config.oauth?.redirectUri ?? 'http://127.0.0.1:32187/callback';
   }
 
   start(name: string): Promise<{ url?: string }> {

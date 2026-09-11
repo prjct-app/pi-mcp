@@ -60,7 +60,7 @@ Supported fields:
 | `oauth.clientId` | Pre-registered public OAuth client ID; requires its exact `oauth.issuer` |
 | `oauth.issuer` | Expected authorization-server issuer; exact-match binding |
 | `oauth.clientMetadataUrl` | HTTPS client ID metadata document |
-| `oauth.redirectUri` | Exact registered callback; defaults to `http://127.0.0.1:32187/callback` |
+| `oauth.redirectUri` | HTTP loopback callback; defaults to `http://127.0.0.1:32187/callback` |
 | `oauth.scope` | Explicit requested scopes |
 | `protocolVersion` | `auto` (default), `legacy`, or `2026-07-28` |
 | `requestTimeoutMs` | Request deadline; defaults to 15 seconds |
@@ -79,19 +79,29 @@ root `settings` are ignored. Configuration is read-only and reloads with `/reloa
 | `/mcp` or `/mcp status` | Connection state; does not connect |
 | `/mcp tools <server>` | Connect on demand and list tool names |
 | `/mcp reconnect <server>` | Close/reset the connection; next tool use reconnects |
-| `/mcp auth <server>` | Explicit manual OAuth; never opens the browser |
+| `/mcp auth <server>` | Request/retry an authorization link; never opens the browser |
 
-OAuth returns a URL in Pi's user interface. **You** open it, approve access, then
-paste the full redirected callback URL into Pi's input dialog, not the chat. The
-loopback page can fail to load: this client intentionally runs no callback HTTP
-server. Copy the browser address anyway. Escape cancels; flows expire after five
-minutes. Pre-registered clients must use the callback registered by their provider.
+Normally, just ask the agent to use Linear (or another configured OAuth server).
+If credentials are missing or cannot be refreshed, the agent gives you **one link**.
+Click it and approve access. **Pi receives the callback automatically**, stores the
+tokens securely, and notifies the agent to continue. No command, pasted URL, code,
+or confirmation message is required. Neither Pi MCP nor the agent opens a browser.
+Parallel requests share the same pending link; they do not create new login flows.
+
+The loopback receiver exists only during authorization, for at most five minutes.
+It binds only to loopback, validates state and the callback target, and serves no
+widgets or scripts. Pre-registered clients must allow the configured HTTP loopback
+redirect. Your browser must reach the machine running Pi; remote/SSH use requires
+loopback port forwarding. Remote HTTPS callbacks and device-code flows are not
+implemented. `/mcp auth <server>` remains an explicit retry after cancellation or
+expiry; failed flows do not automatically regenerate links. Another process owning
+the callback port causes a clear failure, not a second flow or browser window.
 
 Credentials are stored in a separate OS-keyring namespace, bound to server
 configuration and authorization-server issuer. Refreshes are serialized, including
 across Pi processes using the same agent directory. If the OS keyring is locked or
 unavailable, authentication fails rather than writing secrets to plaintext files.
-An expired/invalid refresh grant asks for explicit authentication, never a browser.
+An expired/invalid refresh grant produces a link for user approval, never a browser launch.
 
 ## Agent tool
 
@@ -110,8 +120,11 @@ mcp({ action: "prompt", server: "local", prompt: "discovered_prompt", args: {} }
 ```
 
 Use the discovered input schema to supply real arguments. `tools` supports `query`,
-`tool`, `limit`, and `offset`. The tool cannot authenticate, reset connections,
-change configuration, or open browsers. Text and supported images return inline;
+`tool`, `limit`, and `offset`. In TUI/RPC mode, missing OAuth produces an
+`authorization_required` result with an `authorizationUrl`. Show that link once and
+wait for the `mcp-auth` completion message; do not poll. The tool cannot grant user
+consent, reset connections, change configuration, or open browsers. Print/JSON
+mode cannot keep a callback alive and requires previously saved credentials. Text and supported images return inline;
 structured results are preserved as bounded JSON. MCP tool errors become Pi errors.
 
 ## Protocol and safety
@@ -146,7 +159,7 @@ capabilities are not advertised. See the [compatibility matrix](docs/package.md)
 | Inline text | 50 KiB or 2,000 lines; truncation is explicit |
 | Overflow files | Private files; 50 MiB per session; removed on normal shutdown |
 | Images | Four inline images, at most 2 MiB base64 each; PNG/JPEG/GIF/WebP |
-| OAuth | 20-second network budget per phase, five-minute manual callback window |
+| OAuth | 20-second network budget per phase, five-minute automatic callback window |
 | Credential locks | 30-second wait; never steal an active lock based on age |
 
 If connection setup fails, correct configuration/authentication and use
@@ -177,7 +190,16 @@ python3 scripts/smoke-tui.py
 TypeScript entry directly. The opt-in smoke test uses an isolated real Pi TUI and
 makes no model calls. Automated tests never read real credentials or use production
 MCP services. Live Linear/Jira OAuth and native keyring persistence still need
-explicit manual verification before replacing the existing adapter.
+explicit manual verification before replacing the existing adapter. For an authorized,
+read-only live Linear check using only this package's keyring and OAuth client:
+
+```sh
+node --import tsx scripts/smoke-linear.ts --live
+```
+
+It returns the link when needed, waits for the browser callback without opening a
+browser, and verifies discovery again through a fresh credential manager. The
+script reports only status/counts and the user-facing link, never tokens or codes.
 
 [Architecture](docs/architecture.md) · [Package and compatibility](docs/package.md) ·
 [Grouped releases](docs/releases.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
