@@ -30,11 +30,13 @@ native OS keyring binding. There are no browser or MCP Apps dependencies of our 
 | Pi TUI | Isolated real-CLI PTY smoke: load, repeated status, exit, no model calls |
 | TUI/RPC/print/JSON mode logic | API harness; no startup network or auth interaction |
 | Modern stdio | Real child server, `2026-07-28`, ten parallel calls, shared PID, teardown |
+| Core protocol operations | Local fixtures for tools, static and templated resources, argument completion, and prompts |
 | Legacy stdio | Real legacy-only child; auto fallback and pin rejection |
 | Modern Streamable HTTP | Local SDK HTTP server; per-request modern metadata, ten calls, no UI capability or widget fetch |
 | HTTP failures | 401/403/503 do not cause a retry/fallback storm |
 | Cancellation/replacement | Caller abort, setup shutdown, idempotent close, fresh session instance |
 | OAuth flow | Offline fake authorization server using the real SDK auth engine; PKCE, state, issuer, URL isolation, persistence and refresh |
+| Machine OAuth | Local protected HTTP fixture verifies SDK discovery/token exchange, Basic client authentication, exact issuer, environment-only secret, and no redirect or interactive flow |
 | OAuth link UX | Pi tool harness: ten requests share one link; real loopback callback saves credentials and wakes the agent once; wrong-state, expiry and session-switch checks |
 | OAuth concurrency | Independent managers with a shared secure-store transaction boundary renew once |
 | Cross-process lock | Four real processes cannot overlap credential transactions |
@@ -61,11 +63,12 @@ Before replacing the current adapter:
 2. Repeat the verified Linear link/callback flow with Jira;
    confirm the configured redirect URI and client registration method are accepted.
 3. Verify native keyring persistence across restart and token renewal on this host.
-4. Confirm behavior with real Pi RPC clients; mode guards are harness-tested, not a
+4. Verify `client_credentials` discovery and token exchange against an authorized real service; automated tests cover the full exchange against a local protected fixture without real credentials.
+5. Confirm behavior with real Pi RPC clients; mode guards are harness-tested, not a
    full end-to-end matrix of RPC consumers.
-5. Run Linux CI and inspect platform keyring availability (usually unlocked Secret
+6. Run Linux CI and inspect platform keyring availability (usually unlocked Secret
    Service). Native Windows is not supported in this preview.
-6. Review the tool schema change: this is not a drop-in replacement for the old
+7. Review the tool schema change: this is not a drop-in replacement for the old
    adapter's argument shapes, namespace proxies, MCP Apps, or `mcpScript`.
 
 The tests do not read production credentials, launch browsers, call models, or

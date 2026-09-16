@@ -1,7 +1,8 @@
 # pi-mcp
 
-A terminal-first MCP client for Pi. Query servers, read resources, and retrieve
-prompts without opening browser tabs or executing MCP App interfaces.
+A terminal-first MCP client for Pi. Query servers, use resource templates and
+completions, read resources, and retrieve prompts without opening
+browser tabs or executing MCP App interfaces.
 
 **Development preview. Not published or installed automatically.** Tested with
 Pi **0.85.1**, MCP TypeScript SDK **2.0.0**, and Node.js **22.22.2** on macOS.
@@ -60,9 +61,11 @@ Supported fields:
 | `headers` | Explicit HTTP headers; `${ENV_VAR}` interpolation supported |
 | `auth` | `oauth` or `bearer`; omit for unauthenticated/custom-header servers |
 | `bearerTokenEnv` | Environment variable containing a bearer token |
-| `oauth.clientId` | Pre-registered public OAuth client ID; requires its exact `oauth.issuer` |
+| `oauth.grantType` | `authorization_code` (default) or non-interactive `client_credentials` |
+| `oauth.clientId` | Pre-registered OAuth client ID; requires its exact `oauth.issuer` |
+| `oauth.clientSecretEnv` | Environment variable containing the machine OAuth secret; `client_credentials` only |
 | `oauth.issuer` | Expected authorization-server issuer; exact-match binding |
-| `oauth.clientMetadataUrl` | HTTPS client ID metadata document |
+| `oauth.clientMetadataUrl` | HTTPS client ID metadata document; interactive authorization only |
 | `oauth.redirectUri` | HTTP loopback callback; defaults to `http://127.0.0.1:32187/callback` |
 | `oauth.scope` | Explicit requested scopes |
 | `protocolVersion` | `auto` (default), `legacy`, or `2026-07-28` |
@@ -74,6 +77,32 @@ Relative `cwd` values resolve against the configuration file's directory.
 Missing variables fail closed; no `!command` secret evaluation is supported.
 Unknown server options and nonempty host `imports` are rejected. Adapter-specific
 root `settings` are ignored. Configuration is read-only and reloads with `/reload`.
+
+For service-to-service APIs, machine OAuth obtains short-lived tokens without a
+browser, callback, or stored client secret:
+
+```json
+{
+  "mcpServers": {
+    "internal-api": {
+      "url": "https://api.example.com/mcp",
+      "auth": "oauth",
+      "oauth": {
+        "grantType": "client_credentials",
+        "clientId": "pi-service",
+        "clientSecretEnv": "INTERNAL_API_CLIENT_SECRET",
+        "issuer": "https://auth.example.com",
+        "scope": "mcp:read"
+      }
+    }
+  }
+}
+```
+
+`client_credentials` requires an exact HTTPS issuer and does not accept redirect
+URIs or client metadata documents. The secret is read from the named environment
+variable only when connecting and is never copied into configuration or keyring
+storage. Acquired machine tokens are session-memory only.
 
 ## Commands
 
@@ -117,13 +146,16 @@ mcp({ action: "tools", server: "jira", query: "search", limit: 5 })
 mcp({ action: "tools", server: "jira", tool: "discovered_tool_name" })
 mcp({ action: "call", server: "jira", tool: "discovered_tool_name", args: {} })
 mcp({ action: "resources", server: "local" })
+mcp({ action: "templates", server: "local" })
 mcp({ action: "read", server: "local", uri: "example://resource" })
 mcp({ action: "prompts", server: "local" })
 mcp({ action: "prompt", server: "local", prompt: "discovered_prompt", args: {} })
+mcp({ action: "complete", server: "local", uri: "example://docs/{topic}", argument: "topic", value: "auth", args: {} })
 ```
 
 Use the discovered input schema to supply real arguments. `tools` supports `query`,
-`tool`, `limit`, and `offset`. In TUI/RPC mode, missing OAuth produces an
+`tool`, `limit`, and `offset`. `complete` accepts exactly one prompt name or resource-template
+URI plus an argument name, partial value, and optional string context arguments. In TUI/RPC mode, missing interactive OAuth produces an
 `authorization_required` result with an `authorizationUrl`. Show that link once and
 wait for the `mcp-auth` completion message; do not poll. The tool cannot grant user
 consent, reset connections, change configuration, or open browsers. Print/JSON
@@ -155,7 +187,7 @@ agent's reply, not as a second raw URL dump in the tool row.
   tool hooks still see the proxy call and its arguments. This is **not a sandbox**;
   a configured stdio executable can itself spawn programs, including browsers.
 
-MCP Apps, sampling, roots, elicitation, tasks, SSE-only legacy transport, direct-tool
+MCP Apps, sampling, roots, elicitation, tasks, deprecated SSE-only transport, direct-tool
 registration, and `mcpScript` are intentionally not implemented. Optional
 capabilities are not advertised. See the [compatibility matrix](docs/package.md).
 

@@ -37,6 +37,12 @@ test('Pi public loader loads the package; ten tool calls return inline without l
     }, undefined, undefined, ctx)));
     assert.equal(results.length, 10);
     assert.ok(results.every(result => JSON.stringify(result.content).includes('request-')));
+    const templates = await tool.execute('templates', { action: 'templates', server: 'local' }, undefined, undefined, ctx);
+    assert.match(JSON.stringify(templates.content), /fixture:\/\/docs\/\{topic\}/);
+    const completion = await tool.execute('complete', {
+      action: 'complete', server: 'local', uri: 'fixture://docs/{topic}', argument: 'topic', value: 'pro', args: {},
+    }, undefined, undefined, ctx);
+    assert.match(JSON.stringify(completion.content), /protocols/);
     await assert.rejects(access(marker), { code: 'ENOENT' });
     assert.ok(extension.commands.has('mcp'));
     await stop();

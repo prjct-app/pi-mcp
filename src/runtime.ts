@@ -1,4 +1,4 @@
-import { Client, StreamableHTTPClientTransport, type AuthProvider, type CallToolResult, type Tool, type Transport } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport, type AuthProvider, type CallToolResult, type CompleteRequestParams, type OAuthClientProvider, type Tool, type Transport } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import type { ServerConfig } from './config.ts';
 
@@ -30,7 +30,8 @@ export class McpRuntime {
 
   constructor(
     private readonly servers: Record<string, ServerConfig>,
-    private readonly authProvider?: (name: string, server: ServerConfig) => AuthProvider,
+    private readonly authProvider?: (name: string, server: ServerConfig) => AuthProvider | OAuthClientProvider,
+    private readonly fetchFn?: typeof fetch,
   ) {}
 
   status() {
@@ -70,6 +71,7 @@ export class McpRuntime {
       ? new StreamableHTTPClientTransport(new URL(config.url), {
         requestInit: { headers: config.headers, redirect: 'error' },
         authProvider: this.authProvider?.(name, config),
+        fetch: this.fetchFn,
         onInsufficientScope: 'throw',
         reconnectionOptions: { maxRetries: 0, maxReconnectionDelay: 1000, initialReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 },
       })
@@ -120,6 +122,17 @@ export class McpRuntime {
     const client = await this.connect(name, signal);
     if (!client.getServerCapabilities()?.resources) return [];
     return (await client.listResources(undefined, this.requestOptions(name, signal))).resources;
+  }
+
+  async templates(name: string, signal?: AbortSignal) {
+    const client = await this.connect(name, signal);
+    if (!client.getServerCapabilities()?.resources) return [];
+    return (await client.listResourceTemplates(undefined, this.requestOptions(name, signal))).resourceTemplates;
+  }
+
+  async complete(name: string, params: CompleteRequestParams, signal?: AbortSignal) {
+    const client = await this.connect(name, signal);
+    return client.complete(params, this.requestOptions(name, signal));
   }
 
   async read(name: string, uri: string, signal?: AbortSignal) {

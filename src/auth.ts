@@ -1,5 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
-import { auth, resourceUrlFromServerUrl, checkResourceAllowed, type AuthProvider, type OAuthClientProvider, type OAuthDiscoveryState, type StoredOAuthClientInformation, type StoredOAuthTokens } from '@modelcontextprotocol/client';
+import { auth, ClientCredentialsProvider, resourceUrlFromServerUrl, checkResourceAllowed, type AuthProvider, type OAuthClientProvider, type OAuthDiscoveryState, type StoredOAuthClientInformation, type StoredOAuthTokens } from '@modelcontextprotocol/client';
 import { z } from 'zod';
 import { join } from 'node:path';
 import { getAgentDir } from '@earendil-works/pi-coding-agent';
@@ -28,6 +28,20 @@ export class KeyringSecrets implements SecretStore {
 
 export class AuthRequired extends Error {
   constructor(name: string) { super(`MCP authorization required. Run /mcp auth ${name}. No browser was opened.`); }
+}
+
+/** Ephemeral machine OAuth: the configured environment variable is read only when connecting. */
+export function machineAuthProvider(name: string, config: ServerConfig, env: NodeJS.ProcessEnv = process.env): OAuthClientProvider {
+  const oauth = config.oauth;
+  if (config.auth !== 'oauth' || oauth?.grantType !== 'client_credentials' || !oauth.clientId || !oauth.clientSecretEnv || !oauth.issuer) {
+    throw new Error(`Machine OAuth is not fully configured for ${name}`);
+  }
+  const clientSecret = env[oauth.clientSecretEnv];
+  if (!clientSecret) throw new Error(`Machine OAuth credential environment variable is unavailable for ${name}`);
+  return new ClientCredentialsProvider({
+    clientId: oauth.clientId, clientSecret, expectedIssuer: oauth.issuer,
+    ...(oauth.scope ? { scope: oauth.scope } : {}), clientName: 'Pi MCP',
+  });
 }
 
 interface Credentials {

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add non-interactive OAuth `client_credentials` with exact issuer binding and environment-only secrets; no browser, redirect, callback, or durable machine-token storage.
+- Expose MCP resource-template discovery and prompt/resource argument completion through the bounded proxy tool.
 - Replace Pi's raw-content tool rendering with compact summaries; keep discovery schemas
   available to the agent without displaying them in collapsed or expanded TUI rows.
 

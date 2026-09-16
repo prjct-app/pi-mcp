@@ -1,4 +1,4 @@
-import { McpServer, fromJsonSchema } from '@modelcontextprotocol/server';
+import { McpServer, ResourceTemplate, fromJsonSchema } from '@modelcontextprotocol/server';
 import { serveStdio, StdioServerTransport } from '@modelcontextprotocol/server/stdio';
 import { setTimeout as delay } from 'node:timers/promises';
 
@@ -19,6 +19,9 @@ export function fixtureServer(era = 'legacy') {
     throw new Error('UI resources must not be fetched automatically');
   });
   server.registerResource('about', 'fixture://about', {}, async uri => ({ contents: [{ uri: uri.href, text: 'Offline fixture' }] }));
+  server.registerResource('docs', new ResourceTemplate('fixture://docs/{topic}', {
+    list: undefined, complete: { topic: value => ['authentication', 'configuration', 'protocols'].filter(topic => topic.startsWith(value)) },
+  }), { description: 'Fixture documentation by topic' }, async (uri, variables) => ({ contents: [{ uri: uri.href, text: `Documentation for ${variables.topic}` }] }));
   server.registerPrompt('greet', { description: 'A greeting' }, async () => ({ messages: [{ role: 'user', content: { type: 'text', text: 'Hello' } }] }));
   return server;
 }
