@@ -104,6 +104,38 @@ URIs or client metadata documents. The secret is read from the named environment
 variable only when connecting and is never copied into configuration or keyring
 storage. Acquired machine tokens are session-memory only.
 
+### Notion, Stripe, and GitHub
+
+These definitions use the providers' official hosted MCP endpoints. Secrets stay in
+environment variables rather than JSON. Notion's hosted server requires interactive
+OAuth; pi-mcp returns a link but never opens it. Stripe should use a restricted key,
+and the GitHub PAT should have only the permissions needed by the enabled tools.
+
+```json
+{
+  "mcpServers": {
+    "notion": {
+      "url": "https://mcp.notion.com/mcp",
+      "auth": "oauth"
+    },
+    "stripe": {
+      "url": "https://mcp.stripe.com",
+      "auth": "bearer",
+      "bearerTokenEnv": "STRIPE_API_KEY"
+    },
+    "github": {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "auth": "bearer",
+      "bearerTokenEnv": "GITHUB_PERSONAL_ACCESS_TOKEN"
+    }
+  }
+}
+```
+
+Official setup references: [Notion MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp),
+[Stripe MCP](https://docs.stripe.com/mcp), and
+[GitHub remote MCP](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md).
+
 ## Commands
 
 | Command | Result |
