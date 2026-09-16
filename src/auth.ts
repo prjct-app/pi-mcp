@@ -6,6 +6,16 @@ import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { withCredentialLock } from './store.ts';
 import { safeUrl, type ServerConfig } from './config.ts';
 
+const MAX_AUTHORIZATION_URL_LENGTH = 4096;
+
+/** @internal Validate the exact link that may be displayed in the terminal. */
+export function validateAuthorizationUrl(value: string): URL {
+  const target = safeUrl(value);
+  if (target.protocol !== 'https:') throw new Error('OAuth authorization requires HTTPS');
+  if (target.href.length > MAX_AUTHORIZATION_URL_LENGTH) throw new Error('OAuth authorization URL exceeds the safe display limit');
+  return target;
+}
+
 export interface SecretStore {
   withLock<T>(key: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T>;
   get(key: string): Promise<string | undefined>;
@@ -187,8 +197,8 @@ export class OAuthManager {
       },
       redirectToAuthorization: url => {
         if (!interactive) throw new AuthRequired(account.name);
-        if (safeUrl(url.href).protocol !== 'https:') throw new Error('OAuth authorization requires HTTPS');
-        flow.url = url.href; // Returned as a user-clickable link. Never spawned; codes and tokens stay private.
+        const target = validateAuthorizationUrl(url.href);
+        flow.url = target.href; // Returned as a user-clickable link. Never spawned; codes and tokens stay private.
       },
       saveCodeVerifier: value => { transient.current = { ...transient.current, verifier: value }; },
       codeVerifier: () => { const verifier = transient.current.verifier; if (!verifier) throw new Error('OAuth verifier is unavailable'); return verifier; },

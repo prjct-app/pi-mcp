@@ -141,7 +141,7 @@ Official setup references: [Notion MCP](https://developers.notion.com/guides/mcp
 | Command | Result |
 | --- | --- |
 | `/mcp` or `/mcp status` | Connection state; does not connect |
-| `/mcp tools <server>` | Connect on demand and list tool names |
+| `/mcp tools <server>` | Connect on demand and show a compact list of up to 20 tool names |
 | `/mcp reconnect <server>` | Close/reset the connection; next tool use reconnects |
 | `/mcp auth <server>` | Request/retry an authorization link; never opens the browser |
 
@@ -194,8 +194,10 @@ consent, reset connections, change configuration, or open browsers. Print/JSON
 mode cannot keep a callback alive and requires previously saved credentials. Text and supported images return inline;
 structured results are preserved as bounded JSON. MCP tool errors become Pi errors.
 
-In Pi's TUI, MCP rows show compact counts/status instead of raw JSON. Expanding
-shows bounded names/states, never discovery schemas or raw arguments/responses.
+In Pi's TUI, MCP rows use action-aware progress/error labels and semantic theme
+colors instead of raw JSON. Status rows summarize connected, failed, and inactive
+servers; expanding discovery results shows a bounded tree of names/states, never
+discovery schemas or raw arguments/responses.
 The agent still receives the complete bounded payload and presents the useful
 answer. This is presentation, not secret redaction: RPC/print/JSON consumers and
 session data retain the original tool payload. Authorization links appear in the

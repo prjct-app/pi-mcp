@@ -14,7 +14,7 @@ export class MemorySecrets implements SecretStore {
   async delete(key: string) { this.data.delete(key); }
 }
 
-export function oauthFixture() {
+export function oauthFixture(options: { authorizationEndpoint?: string } = {}) {
   const requests: string[] = [];
   let refreshes = 0;
   const fetchFn: typeof fetch = async (input, init) => {
@@ -23,7 +23,7 @@ export function oauthFixture() {
     const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
     if (url.includes('.well-known/oauth-protected-resource')) return json({ resource: 'https://mcp.example.test/mcp', authorization_servers: ['https://auth.example.test'] });
     if (url === 'https://auth.example.test/.well-known/oauth-authorization-server') return json({
-      issuer: 'https://auth.example.test', authorization_endpoint: 'https://auth.example.test/authorize',
+      issuer: 'https://auth.example.test', authorization_endpoint: options.authorizationEndpoint ?? 'https://auth.example.test/authorize',
       token_endpoint: 'https://auth.example.test/token', registration_endpoint: 'https://auth.example.test/register',
       response_types_supported: ['code'], grant_types_supported: ['authorization_code','refresh_token'],
       code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['none'],
