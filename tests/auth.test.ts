@@ -1,10 +1,23 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { OAuthManager } from '../src/auth.ts';
+import { OAuthManager, machineAuthProvider } from '../src/auth.ts';
 
 import { MemorySecrets, oauthFixture } from './fixtures/oauth.ts';
 
 const servers = { remote: { url: 'https://mcp.example.test/mcp', auth: 'oauth' as const } };
+
+test('machine OAuth uses an environment-only secret and never defines an interactive redirect', async () => {
+  const provider = machineAuthProvider('remote', { ...servers.remote, oauth: {
+    grantType: 'client_credentials', clientId: 'machine-id', clientSecretEnv: 'MCP_MACHINE_SECRET', issuer: 'https://auth.example.test', scope: 'mcp:read',
+  } }, { MCP_MACHINE_SECRET: 'fixture-secret' });
+  assert.equal(provider.redirectUrl, undefined);
+  assert.deepEqual(provider.clientMetadata.grant_types, ['client_credentials']);
+  assert.equal((await provider.clientInformation())?.issuer, 'https://auth.example.test');
+  assert.equal((await provider.prepareTokenRequest!())?.get('grant_type'), 'client_credentials');
+  assert.throws(() => machineAuthProvider('remote', { ...servers.remote, oauth: {
+    grantType: 'client_credentials', clientId: 'machine-id', clientSecretEnv: 'MISSING', issuer: 'https://auth.example.test',
+  } }, {}), /unavailable/i);
+});
 
 test('unauthenticated parallel requests never initiate OAuth; explicit login validates state and refreshes once', async () => {
   const fixture = oauthFixture();

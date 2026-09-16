@@ -1,7 +1,7 @@
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
-import { AuthRequired, OAuthManager, type SecretStore } from './auth.ts';
+import { AuthRequired, OAuthManager, machineAuthProvider, type SecretStore } from './auth.ts';
 import { loadConfig, type ServerConfig } from './config.ts';
 import { McpRuntime, abortable } from './runtime.ts';
 import { renderCall, renderResult } from './render.ts';
@@ -9,7 +9,7 @@ import { AuthLinks, AuthLinkError, type LoginResult } from './login.ts';
 import { Output, plain } from './output.ts';
 
 const HELP = '/mcp status | tools <server> | reconnect <server> | auth <server>';
-const ACTIONS = ['status', 'tools', 'call', 'resources', 'read', 'prompts', 'prompt'] as const;
+const ACTIONS = ['status', 'tools', 'call', 'resources', 'templates', 'read', 'prompts', 'prompt', 'complete'] as const;
 interface Services { runtime: McpRuntime; auth: OAuthManager; servers: Record<string, ServerConfig>; links: AuthLinks }
 type Session = Readonly<{ pending?: Promise<Services>; closed: boolean }>;
 
@@ -40,6 +40,7 @@ export function installMcp(pi: ExtensionAPI, options: {
       if (get().closed) throw new Error('MCP session is closed');
       const auth = new OAuthManager(servers, options.secretStore, options.fetchFn);
       const runtime = new McpRuntime(servers, (name, config) => {
+        if (config.auth === 'oauth' && config.oauth?.grantType === 'client_credentials') return machineAuthProvider(name, config);
         if (config.auth === 'oauth') return auth.provider(name);
         return { token: async () => {
           if (!config.bearerTokenEnv) return undefined;
@@ -71,18 +72,18 @@ export function installMcp(pi: ExtensionAPI, options: {
   async function run(active: Services, name: string, ctx: ExtensionContext, operation: () => Promise<unknown>, signal?: AbortSignal): Promise<unknown> {
     try {
       // Detect missing/expired OAuth before connecting or dispatching a potentially mutating tool.
-      if (Object.hasOwn(active.servers, name) && active.servers[name]?.auth === 'oauth') await active.auth.provider(name).token();
+      if (Object.hasOwn(active.servers, name) && active.servers[name]?.auth === 'oauth' && active.servers[name]?.oauth?.grantType !== 'client_credentials') await active.auth.provider(name).token();
       return await operation();
     } catch (error) {
       signal?.throwIfAborted();
-      if (error instanceof AuthRequired && active.servers[name]?.auth === 'oauth') return requestLink(active, name, ctx);
+      if (error instanceof AuthRequired && active.servers[name]?.auth === 'oauth' && active.servers[name]?.oauth?.grantType !== 'client_credentials') return requestLink(active, name, ctx);
       throw error;
     }
   }
 
   pi.registerTool({
     name: 'mcp', label: 'MCP', renderCall, renderResult,
-    description: 'Use configured MCP servers: status, tools (search/describe), call, resources/read, prompts/prompt. Missing OAuth returns a user-clickable link; completion is detected automatically. No browser launches. Output is capped at 50 KiB / 2000 lines with private overflow files.',
+    description: 'Use configured MCP servers: status, tools/call, resources/templates/read, prompts/prompt, and argument completion. Supports user OAuth links and non-interactive machine OAuth. No browser launches or HTML execution. Output is capped at 50 KiB / 2000 lines with private overflow files.',
     promptSnippet: 'Discover and call configured MCP tools without opening web interfaces',
     promptGuidelines: [
       'Summarize MCP results for the user. Do not echo discovery schemas or raw MCP JSON in user-facing replies unless explicitly requested.',
@@ -98,6 +99,8 @@ export function installMcp(pi: ExtensionAPI, options: {
       query: Type.Optional(Type.String({ maxLength: 256 })),
       uri: Type.Optional(Type.String({ maxLength: 4096 })),
       prompt: Type.Optional(Type.String({ maxLength: 256 })),
+      argument: Type.Optional(Type.String({ maxLength: 256 })),
+      value: Type.Optional(Type.String({ maxLength: 4096 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })),
       offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100000 })),
     }),
@@ -121,6 +124,7 @@ export function installMcp(pi: ExtensionAPI, options: {
             if (!params.tool) throw new Error('Specify tool');
             return runtime.call(params.server!, params.tool, params.args ?? {}, signal);
           case 'resources': return runtime.resources(params.server!, signal);
+          case 'templates': return runtime.templates(params.server!, signal);
           case 'read':
             if (!params.uri) throw new Error('Specify uri');
             return runtime.read(params.server!, params.uri, signal);
@@ -128,6 +132,13 @@ export function installMcp(pi: ExtensionAPI, options: {
           case 'prompt':
             if (!params.prompt || Object.values(params.args ?? {}).some(value => typeof value !== 'string')) throw new Error('Specify prompt and string arguments');
             return runtime.prompt(params.server!, params.prompt, params.args as Record<string, string> ?? {}, signal);
+          case 'complete': {
+            if ((!params.prompt && !params.uri) || (params.prompt && params.uri) || !params.argument || params.value === undefined || Object.values(params.args ?? {}).some(value => typeof value !== 'string')) {
+              throw new Error('Specify exactly one prompt or resource-template uri, plus argument, value, and optional string context arguments');
+            }
+            const ref = params.prompt ? { type: 'ref/prompt' as const, name: params.prompt } : { type: 'ref/resource' as const, uri: params.uri! };
+            return runtime.complete(params.server!, { ref, argument: { name: params.argument, value: params.value }, context: { arguments: params.args as Record<string, string> ?? {} } }, signal);
+          }
           default: throw new Error('Unknown MCP action');
         }
       };
@@ -149,7 +160,7 @@ export function installMcp(pi: ExtensionAPI, options: {
       if (extra.length || (command !== 'status' && !name)) { ctx.ui.notify(HELP, 'info'); return; }
       try {
         const active = await services(ctx);
-        const { runtime, links } = active;
+        const { runtime, links, servers } = active;
         if (command === 'status') { ctx.ui.notify(runtime.status().map(server => `${server.name}: ${server.state}${server.era ? ` (${server.era})` : ''}`).join('\n') || 'No MCP servers configured.', 'info'); return; }
         if (command === 'tools') {
           const result = await run(active, name!, ctx, () => runtime.tools(name!));
@@ -158,6 +169,7 @@ export function installMcp(pi: ExtensionAPI, options: {
         }
         if (command === 'reconnect') { await runtime.reconnect(name!); ctx.ui.notify('Connection reset. It will connect on the next call.', 'info'); return; }
         if (command !== 'auth') { ctx.ui.notify(HELP, 'info'); return; }
+        if (servers[name!]?.oauth?.grantType === 'client_credentials') { ctx.ui.notify(`MCP server ${name} uses non-interactive machine OAuth; configure its clientSecretEnv environment variable.`, 'info'); return; }
         const result = await links.request(name!, true);
         ctx.ui.notify(result.authorizationUrl
           ? `Click to authorize ${name}:\n${result.authorizationUrl}\nPi detects approval automatically. No callback needs to be pasted.`

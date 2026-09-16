@@ -44,9 +44,11 @@ SDK. A cold cancelled request can leave a resident connection for future callers
 it does not leak beyond session teardown.
 
 Tools/list calls in flight are coalesced. The SDK owns response-cache TTLs,
-private partitions, schemas, and protocol details. Results with zero TTL are not
-made fresh by a host override. Tool catalogs are re-read through the SDK before
-calls, so its fresh-cache and invalidation rules apply. There is no persistent
+private partitions, schemas, list-changed invalidation, pagination, and protocol details.
+Results with zero TTL are not made fresh by a host override. Tool catalogs are re-read
+through the SDK before calls, so its fresh-cache and invalidation rules apply. Resource
+templates and protocol argument completion use the same bounded request/cancellation path.
+There is no persistent
 metadata cache, polling loop, idle reconnect timer, or connection sharing between
 Pi processes. Resource reads use the SDK's bounded memory cache.
 
@@ -71,7 +73,9 @@ The client does not spawn a fresh process for every call. HTTP auto discovery
 uses the endpoint itself. Deprecated HTTP+SSE is not implemented.
 
 Optional client capabilities are empty. In particular this client does not
-claim support for MCP Apps, sampling, roots, tasks, or elicitation. Unsupported
+claim support for MCP Apps, sampling, roots, tasks, or elicitation. Core client
+operations include tools, resources and resource templates, prompts, and argument
+completion. Unsupported
 multi-round-trip input is surfaced by the SDK as an error rather than being
 silently accepted or automatically opening a user interaction. A compliant
 server can use its ordinary text/structured-result fallback.
@@ -118,7 +122,13 @@ owns discovery, PKCE S256, client registration, resource validation, issuer chec
 and code exchange. Background refresh has no dynamic-registration persistence hook
 and refuses any redirect. Scope escalation fails and requires explicit user action.
 
-Each secure record is keyed by a hash of server name, endpoint and OAuth settings,
+Interactive authorization-code credentials use the durable storage design below.
+Machine `client_credentials` authentication is separate: the client ID and exact issuer
+come from configuration, the client secret is read from a named environment variable at
+connection time, and acquired tokens remain in session memory. It has no redirect,
+browser link, callback listener, dynamic registration, or keyring record.
+
+Each secure interactive record is keyed by a hash of server name, endpoint and OAuth settings,
 then holds credentials under exact authorization-server issuer keys. Reads validate
 version, configuration binding, schema, and issuer stamps. The namespace is
 `app.prjct.pi-mcp`; no other adapter's credentials are read or migrated. Native OS

@@ -27,10 +27,17 @@ test('configuration rejects unsafe transports and implicit secret commands witho
     { url: 'https://example.test/mcp', command: 'node' },
     { url: 'https://example.test/mcp', headers: { Authorization: '!private-command' } },
     { url: 'https://example.test/mcp', auth: 'oauth', oauth: { clientId: 'registered-without-issuer' } },
+    { url: 'https://example.test/mcp', auth: 'oauth', oauth: { grantType: 'client_credentials', clientId: 'machine', clientSecretEnv: 'SECRET' } },
+    { url: 'https://example.test/mcp', auth: 'oauth', oauth: { grantType: 'client_credentials', clientId: 'machine', clientSecretEnv: 'INVALID-NAME', issuer: 'https://auth.example.test' } },
+    { url: 'https://example.test/mcp', auth: 'oauth', oauth: { clientSecretEnv: 'SECRET', issuer: 'https://auth.example.test' } },
     { command: 'node', env: { TOKEN: '${MISSING_FIXTURE_ENV}' } },
     { command: 'node', unsupported: true },
   ]) assert.throws(() => parseServers({ fixture: entry }, '/tmp', {}));
   assert.deepEqual(parseServers({ off: { disabled: true } }, '/tmp'), { off: { disabled: true } });
   const valid = parseServers({ fixture: { url: 'https://example.test/mcp', headers: { 'X-Fixture': '${FIXTURE_ENV}' } } }, '/tmp', { FIXTURE_ENV: 'test-value' });
   assert.equal(valid.fixture?.headers?.['X-Fixture'], 'test-value');
+  const machine = parseServers({ machine: { url: 'https://example.test/mcp', auth: 'oauth', oauth: {
+    grantType: 'client_credentials', clientId: 'machine-id', clientSecretEnv: 'MCP_MACHINE_SECRET', issuer: 'https://auth.example.test', scope: 'mcp:read',
+  } } }, '/tmp', {});
+  assert.equal(machine.machine?.oauth?.clientSecretEnv, 'MCP_MACHINE_SECRET');
 });

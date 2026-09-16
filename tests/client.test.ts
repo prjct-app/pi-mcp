@@ -39,6 +39,9 @@ test('legacy fallback preserves resource and prompt access without executing UI 
     assert.equal(content.text, 'Offline fixture');
     assert.equal((await runtime.prompts('local'))[0]?.name, 'greet');
     assert.equal((await runtime.prompt('local', 'greet', {})).messages[0]?.content.type, 'text');
+    assert.equal((await runtime.templates('local'))[0]?.uriTemplate, 'fixture://docs/{topic}');
+    const completion = await runtime.complete('local', { ref: { type: 'ref/resource', uri: 'fixture://docs/{topic}' }, argument: { name: 'topic', value: 'a' } });
+    assert.deepEqual(completion.completion.values, ['authentication']);
   } finally { await runtime.close(); }
 });
 

@@ -35,7 +35,7 @@ export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result
 
   const action = record(context.args).action;
   const items = action === 'tools' && Array.isArray(data.items) ? data.items : Array.isArray(value) ? value : undefined;
-  const unit = action === 'tools' ? 'tool' : action === 'status' ? 'server' : action === 'resources' ? 'resource' : action === 'prompts' ? 'prompt' : undefined;
+  const unit = action === 'tools' ? 'tool' : action === 'status' ? 'server' : action === 'resources' ? 'resource' : action === 'templates' ? 'template' : action === 'prompts' ? 'prompt' : undefined;
   const total = action === 'tools' && typeof data.total === 'number' && Number.isSafeInteger(data.total) && data.total >= 0 ? data.total : items?.length;
   const summary = unit && total !== undefined
     ? `${total} ${unit}${total === 1 ? '' : 's'} found${items && total > items.length ? ` · ${items.length} shown` : ''}`

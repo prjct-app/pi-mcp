@@ -48,6 +48,10 @@ export function parseServers(raw: unknown, baseDir: string, env: NodeJS.ProcessE
       }));
     }
     if (server.auth && Object.keys(server.headers ?? {}).some(key => key.toLowerCase() === 'authorization')) throw new Error(`Choose one authorization source for ${name}`);
+    const machineAuth = server.oauth?.grantType === 'client_credentials';
+    if (machineAuth && (!server.oauth?.clientId || !server.oauth.clientSecretEnv || !server.oauth.issuer)) throw new Error(`Machine OAuth for ${name} requires clientId, clientSecretEnv, and exact issuer`);
+    if (machineAuth && (server.oauth?.clientMetadataUrl || server.oauth?.redirectUri)) throw new Error(`Machine OAuth for ${name} cannot use interactive client metadata or redirect URIs`);
+    if (!machineAuth && server.oauth?.clientSecretEnv) throw new Error(`clientSecretEnv requires client_credentials for ${name}`);
     if (server.oauth?.clientId && !server.oauth.issuer) throw new Error(`Pre-registered OAuth client for ${name} requires its exact issuer`);
     if (server.oauth?.issuer && safeUrl(server.oauth.issuer).protocol !== 'https:') throw new Error('OAuth issuer requires HTTPS');
     if (server.oauth?.redirectUri) {
