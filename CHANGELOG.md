@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Document secure official hosted MCP configurations for Notion, Stripe, and GitHub.
+- Update GitHub workflow actions to Node.js 24-based major versions.
 - Add non-interactive OAuth `client_credentials` with exact issuer binding and environment-only secrets; no browser, redirect, callback, or durable machine-token storage.
 - Expose MCP resource-template discovery and prompt/resource argument completion through the bounded proxy tool.
 - Replace Pi's raw-content tool rendering with compact summaries; keep discovery schemas
