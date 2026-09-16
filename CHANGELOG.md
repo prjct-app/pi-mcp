@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Improve MCP tool rows with action-aware progress and errors, exact server-state summaries, semantic theme colors, safe expandable discovery trees, bounded slash-command lists, and bounded OAuth-link display.
 - Document secure official hosted MCP configurations for Notion, Stripe, and GitHub.
 - Update GitHub workflow actions to Node.js 24-based major versions.
 - Add non-interactive OAuth `client_credentials` with exact issuer binding and environment-only secrets; no browser, redirect, callback, or durable machine-token storage.

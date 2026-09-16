@@ -9,6 +9,7 @@ import { AuthLinks, AuthLinkError, type LoginResult } from './login.ts';
 import { Output, plain } from './output.ts';
 
 const HELP = '/mcp status | tools <server> | reconnect <server> | auth <server>';
+const COMMAND_TOOL_LIMIT = 20;
 const ACTIONS = ['status', 'tools', 'call', 'resources', 'templates', 'read', 'prompts', 'prompt', 'complete'] as const;
 interface Services { runtime: McpRuntime; auth: OAuthManager; servers: Record<string, ServerConfig>; links: AuthLinks }
 type Session = Readonly<{ pending?: Promise<Services>; closed: boolean }>;
@@ -19,6 +20,23 @@ function diagnostic(error: unknown): string {
   if (error instanceof Error && /closed|cancelled|aborted/i.test(error.message)) return 'MCP operation cancelled or session closed.';
   const code = (error as { code?: unknown } | null)?.code;
   return `MCP operation failed${typeof code === 'number' || typeof code === 'string' ? ` (${plain(String(code)).slice(0, 80)})` : ''}. Check configuration/authentication; use /mcp reconnect <server> to reset a failed connection. No operation was automatically replayed by pi-mcp.`;
+}
+
+function loginNotice(name: string, result: LoginResult): string {
+  if (result.status === 'authorization_required' && result.authorizationUrl) {
+    return `Click to authorize ${plain(name)}:\n${result.authorizationUrl}\nPi detects approval automatically. No callback needs to be pasted.`;
+  }
+  return plain(result.message).slice(0, 1000);
+}
+
+/** @internal Pure formatting keeps untrusted slash-command lists bounded and testable. */
+export function formatToolNotice(name: string, tools: readonly { name?: unknown }[]): string {
+  const displayable = tools.map(tool => typeof tool.name === 'string' ? plain(tool.name).replace(/\s+/g, ' ').trim().slice(0, 96) : '').filter(Boolean);
+  const names = displayable.slice(0, COMMAND_TOOL_LIMIT);
+  const omitted = Math.max(0, displayable.length - names.length);
+  const unnamed = Math.max(0, tools.length - displayable.length);
+  const details = [names.join('\n') || 'No displayable tool names.', omitted ? `… ${omitted} more; ask the agent to search by name.` : '', unnamed ? `… ${unnamed} unnamed tool${unnamed === 1 ? '' : 's'} hidden.` : ''].filter(Boolean).join('\n');
+  return `${plain(name)} · ${tools.length} tool${tools.length === 1 ? '' : 's'} advertised\n${details}`;
 }
 
 export function installMcp(pi: ExtensionAPI, options: {
@@ -164,16 +182,19 @@ export function installMcp(pi: ExtensionAPI, options: {
         if (command === 'status') { ctx.ui.notify(runtime.status().map(server => `${server.name}: ${server.state}${server.era ? ` (${server.era})` : ''}`).join('\n') || 'No MCP servers configured.', 'info'); return; }
         if (command === 'tools') {
           const result = await run(active, name!, ctx, () => runtime.tools(name!));
-          ctx.ui.notify(Array.isArray(result) ? plain(result.map(tool => tool.name).slice(0, 100).join('\n')) : JSON.stringify(result), 'info');
+          if (!Array.isArray(result)) {
+            const login = result as LoginResult;
+            ctx.ui.notify(loginNotice(name!, login), login.status === 'authorization_failed' ? 'warning' : 'info');
+            return;
+          }
+          ctx.ui.notify(formatToolNotice(name!, result), 'info');
           return;
         }
         if (command === 'reconnect') { await runtime.reconnect(name!); ctx.ui.notify('Connection reset. It will connect on the next call.', 'info'); return; }
         if (command !== 'auth') { ctx.ui.notify(HELP, 'info'); return; }
         if (servers[name!]?.oauth?.grantType === 'client_credentials') { ctx.ui.notify(`MCP server ${name} uses non-interactive machine OAuth; configure its clientSecretEnv environment variable.`, 'info'); return; }
         const result = await links.request(name!, true);
-        ctx.ui.notify(result.authorizationUrl
-          ? `Click to authorize ${name}:\n${result.authorizationUrl}\nPi detects approval automatically. No callback needs to be pasted.`
-          : result.message, 'info');
+        ctx.ui.notify(loginNotice(name!, result), result.status === 'authorization_failed' ? 'warning' : 'info');
       } catch (error) { ctx.ui.notify(diagnostic(error), 'error'); }
     },
   });

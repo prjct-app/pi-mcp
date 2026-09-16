@@ -10,7 +10,7 @@ import { harness } from './harness.ts';
 import { MemorySecrets, oauthFixture } from './fixtures/oauth.ts';
 import { OAuthManager } from '../src/auth.ts';
 
-async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'print' | 'json' } = {}) {
+async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'print' | 'json'; authorizationEndpoint?: string } = {}) {
   const reservation = createServer();
   reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
   const port = (reservation.address() as { port: number }).port;
@@ -18,7 +18,7 @@ async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'prin
   const root = await mkdtemp(join(tmpdir(), 'pi-mcp-login-'));
   const servers = { remote: { url: 'https://mcp.example.test/mcp', auth: 'oauth' as const, oauth: { redirectUri: `http://127.0.0.1:${port}/callback` } } };
   await writeFile(join(root, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
-  const fixture = oauthFixture();
+  const fixture = oauthFixture({ authorizationEndpoint: options.authorizationEndpoint });
   const store = new MemorySecrets();
   const host = harness(root, { mode: options.mode, dependencies: { secretStore: store, fetchFn: fixture.fetchFn, authTimeoutMs: options.timeoutMs } });
   return { root, servers, fixture, store, host, async close() { await host.emit('session_shutdown'); await rm(root, { recursive: true, force: true }); } };
@@ -68,6 +68,28 @@ test('ten unauthenticated Pi requests return one link; a browser callback saves 
   }
 });
 
+
+test('oversized OAuth authorization URLs are rejected before reaching the TUI', async () => {
+  const test = await setup({ authorizationEndpoint: `https://auth.example.test/authorize?padding=${'x'.repeat(5000)}` });
+  try {
+    await test.host.command('tools remote');
+    const notice = test.host.notices.at(-1)!;
+    assert.match(notice, /MCP operation failed/);
+    assert.ok(notice.length < 1000);
+    assert.doesNotMatch(notice, /padding=/);
+  } finally { await test.close(); }
+});
+
+test('slash-command tool discovery formats OAuth as a concise instruction instead of raw JSON', async () => {
+  const test = await setup();
+  try {
+    await test.host.command('tools remote');
+    const notice = test.host.notices.at(-1)!;
+    assert.match(notice, /Click to authorize remote/);
+    assert.match(notice, /https:\/\//);
+    assert.doesNotMatch(notice, /authorization_required|authorizationUrl|[{}]/);
+  } finally { await test.close(); }
+});
 
 test('wrong state and duplicate state cannot consume an outstanding authorization', async () => {
   const test = await setup();

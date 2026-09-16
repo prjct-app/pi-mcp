@@ -1,10 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { OAuthManager, machineAuthProvider } from '../src/auth.ts';
+import { OAuthManager, machineAuthProvider, validateAuthorizationUrl } from '../src/auth.ts';
 
 import { MemorySecrets, oauthFixture } from './fixtures/oauth.ts';
 
 const servers = { remote: { url: 'https://mcp.example.test/mcp', auth: 'oauth' as const } };
+
+test('authorization URL display limit accepts 4096 characters and rejects 4097', () => {
+  const prefix = 'https://auth.example.test/authorize?padding=';
+  const url = (length: number) => prefix + 'x'.repeat(length - prefix.length);
+  assert.equal(new URL(url(4096)).href.length, 4096);
+  assert.equal(validateAuthorizationUrl(url(4096)).href.length, 4096);
+  assert.throws(() => validateAuthorizationUrl(url(4097)), /safe display limit/);
+});
 
 test('machine OAuth uses an environment-only secret and never defines an interactive redirect', async () => {
   const provider = machineAuthProvider('remote', { ...servers.remote, oauth: {
