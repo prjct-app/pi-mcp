@@ -1,98 +1,64 @@
-# Package structure and compatibility
+# Package and compatibility
 
-## Identity and dependency contract
+## Identity
 
-- Local package name: `@prjct.app/pi-mcp`; development preview `0.1.0`.
-- Private repository: [prjct-app/pi-mcp](https://github.com/prjct-app/pi-mcp); default/integration branch `develop`.
-- Local testing loads `build/` produced from `develop`, following pi-team. No registry publication is claimed.
-- Public Pi API baseline: `@earendil-works/pi-coding-agent@0.85.1`.
-- Official MCP client SDK: `@modelcontextprotocol/client@2.0.0`.
-- Node baseline: 22.19+; execution verified on macOS with Node 22.22.2.
+- **Local name**: `@prjct.app/pi-mcp` · **Version**: `0.1.0` · **Private**: yes
+- **Repo**: [prjct-app/pi-mcp](https://github.com/prjct-app/pi-mcp) · **Integration branch**: `develop`
+- **Pi API**: `@earendil-works/pi-coding-agent@0.85.1` · **MCP SDK**: `@modelcontextprotocol/client@2.0.0`
+- **Node**: ≥ 22.19 (verified macOS 22.22.2)
+- **Runtime dependencies**: MCP client, Zod, native keyring. No browsers or MCP Apps.
 
-The root `index.ts` only re-exports `src/index.ts`. Pi loads TypeScript directly.
-`build/` follows pi-team's unpacked-tarball pattern, not a second transpiled code
-path. The package's files allowlist contains runtime sources, documentation and
-license, excluding tests, scripts, workflow/release tooling and dependencies.
-
-Pi-provided libraries are wildcard peer dependencies and are not bundled. Exact
-0.85.1 devDependencies establish a tested baseline; wildcard peers are **not** a
-promise of compatibility with every Pi release. Runtime third-party dependencies
-are the official MCP client, Zod for configuration/record validation, and the
-native OS keyring binding. There are no browser or MCP Apps dependencies of our own.
+---
 
 ## Verified behavior
 
 | Surface | Evidence |
-| --- | --- |
-| Pi package discovery | Public `DefaultResourceLoader` finds precisely the manifest extension |
-| Pi extension loading | Public loader registers `mcp` command and tool |
-| MCP TUI rows | Public registered renderers hide schemas in collapsed/expanded views, retain model payloads, and handle errors, partial results, width and theme changes |
-| Pi TUI | Isolated real-CLI PTY smoke: load, repeated status, exit, no model calls |
-| TUI/RPC/print/JSON mode logic | API harness; no startup network or auth interaction |
-| Modern stdio | Real child server, `2026-07-28`, ten parallel calls, shared PID, teardown |
-| Core protocol operations | Local fixtures for tools, static and templated resources, argument completion, and prompts |
+|---|---|
+| Package discovery | `DefaultResourceLoader` finds the manifest extension |
+| Extension loading | Public loader registers `mcp` command and tool |
+| TUI rows | Registered renderers hide schemas, show states/errors, handle width and theme changes |
+| Pi TUI | Isolated PTY smoke: load, status, exit, no model calls |
+| TUI/RPC/print/JSON modes | API harness; no network or auth at startup |
+| Modern stdio | Real child, `2026-07-28`, 10 parallel calls, shared PID, teardown |
+| Core protocol operations | Local fixtures: tools, resources (static + templated), prompts, argument completion |
 | Legacy stdio | Real legacy-only child; auto fallback and pin rejection |
-| Modern Streamable HTTP | Local SDK HTTP server; per-request modern metadata, ten calls, no UI capability or widget fetch |
-| HTTP failures | 401/403/503 do not cause a retry/fallback storm |
-| Cancellation/replacement | Caller abort, setup shutdown, idempotent close, fresh session instance |
-| OAuth flow | Offline fake authorization server using the real SDK auth engine; PKCE, state, issuer, URL isolation, persistence and refresh |
-| Machine OAuth | Local protected HTTP fixture verifies SDK discovery/token exchange, Basic client authentication, exact issuer, environment-only secret, and no redirect or interactive flow |
-| OAuth link UX | Pi tool harness: ten requests share one link; real loopback callback saves credentials and wakes the agent once; wrong-state, expiry and session-switch checks |
-| OAuth concurrency | Independent managers with a shared secure-store transaction boundary renew once |
-| Cross-process lock | Four real processes cannot overlap credential transactions |
-| Output | Native image blocks, structured JSON, bounded text, private overflow files, terminal controls stripped |
-| Trust | An untrusted project cannot override global server configuration |
+| Modern Streamable HTTP | Local SDK HTTP server; 10 calls, no UI capability or widget fetch |
+| HTTP failures | 401/403/503 do not cause retry/fallback storm |
+| Cancellation/replacement | Caller abort, setup shutdown, idempotent close, fresh session |
+| OAuth flow | Offline fake auth server with real SDK auth engine: PKCE, state, issuer, URL isolation, persistence and refresh |
+| Machine OAuth | Local protected HTTP fixture: SDK discovery/token exchange, Basic auth, exact issuer, env-only secret, no redirect |
+| OAuth link UX | Pi tool harness: 10 requests share 1 link; real loopback callback saves credentials and wakes the agent |
+| OAuth concurrency | Independent managers with shared secure-store boundary renew once |
+| Cross-process lock | 4 real processes do not overlap credential transactions |
+| Output | Native images, structured JSON, bounded text, private overflow, terminal controls stripped |
+| Trust | Untrusted project cannot override global server configuration |
+| Linear live (authorized) | Clickable link + automatic callback + discovery + keyring persistence + fresh process recovery |
 
-Tests are fixtures, **not certification against every MCP server**. The SDK handles
-protocol details; optional features are advertised only if implemented. No claim of
-MCP conformance-suite certification is made.
+Tests are fixtures, **not certification against every MCP server**.
 
-## Live-check status
+---
 
-An explicitly authorized standalone Linear check completed the user-clicked link
-and automatic callback in Pi. Modern discovery succeeded, and a fresh process
-recovered the new tokens from this package's OS-keyring namespace and connected
-again. No previous-adapter token API or browser launcher was involved. Live renewal
-of an expired token and Jira interoperability remain to be checked.
+## Manual verification (before replacing the current adapter)
 
-## Remaining manual verification
+1. Linear and Jira: discovery and read-only tools in an isolated Pi instance.
+2. Jira: link/callback flow with correct redirect URI and client registration.
+3. Native keyring: persistence across restart and token renewal on this host.
+4. `client_credentials`: exchange against a real authorized service.
+5. Real Pi RPC: mode guards are harness-tested, not a full RPC consumer matrix.
+6. Linux CI: platform keyring availability (usually Secret Service). Windows not supported.
+7. Tool schema change: not a drop-in replacement for the old adapter (argument shapes, namespace proxies, MCP Apps, `mcpScript`).
 
-Before replacing the current adapter:
+Tests never read production credentials, launch browsers, call models, or contact real MCP providers.
 
-1. In an isolated Pi instance, verify Linear and Jira discovery and read-only tools.
-2. Repeat the verified Linear link/callback flow with Jira;
-   confirm the configured redirect URI and client registration method are accepted.
-3. Verify native keyring persistence across restart and token renewal on this host.
-4. Verify `client_credentials` discovery and token exchange against an authorized real service; automated tests cover the full exchange against a local protected fixture without real credentials.
-5. Confirm behavior with real Pi RPC clients; mode guards are harness-tested, not a
-   full end-to-end matrix of RPC consumers.
-6. Run Linux CI and inspect platform keyring availability (usually unlocked Secret
-   Service). Native Windows is not supported in this preview.
-7. Review the tool schema change: this is not a drop-in replacement for the old
-   adapter's argument shapes, namespace proxies, MCP Apps, or `mcpScript`.
-
-The tests do not read production credentials, launch browsers, call models, or
-contact real MCP providers. The real TUI smoke uses temporary HOME/configuration.
+---
 
 ## Official references
 
-Pi documentation is pinned to the tested host version:
-
-- [Extensions, lifecycle, tools and mode guards](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/docs/extensions.md)
-- [Package manifest and peer dependency rules](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/docs/packages.md)
-
-The same complete guides and extension examples were inspected from the installed
-Pi 0.85.1 package. MCP documentation was inspected from the official repositories
-and checked against installed SDK 2.0.0 public declarations. The SDK documentation
-snapshot below is a source commit, **not a claimed `v2.0.0` tag**:
-
+- [Pi extensions, lifecycle, tools and mode guards (v0.85.1)](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/docs/extensions.md)
+- [Pi package manifest and peer dependency rules](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/docs/packages.md)
 - [SDK protocol eras](https://github.com/modelcontextprotocol/typescript-sdk/blob/5ecc791d81a7221ebe15ae3ae3f36a8e978af820/docs/protocol-versions.md)
 - [SDK client OAuth](https://github.com/modelcontextprotocol/typescript-sdk/blob/5ecc791d81a7221ebe15ae3ae3f36a8e978af820/docs/clients/oauth.md)
 - [SDK connection lifecycle](https://github.com/modelcontextprotocol/typescript-sdk/blob/5ecc791d81a7221ebe15ae3ae3f36a8e978af820/docs/clients/connect.md)
 - [MCP 2026-07-28 versioning](https://modelcontextprotocol.io/specification/2026-07-28/basic/versioning)
-- [Revision changes and deprecated features](https://modelcontextprotocol.io/specification/2026-07-28/changelog)
-- [OAuth security requirements](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/security-considerations)
-- [Optional MCP Apps](https://modelcontextprotocol.io/extensions/apps/overview)
-
-The MCP protocol revision is `2026-07-28`, the SDK release is `2.0.0`, and the
-message envelope is JSON-RPC 2.0. They are three distinct version labels.
+- [MCP OAuth security](https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization/security-considerations)
+- [MCP Apps (not implemented)](https://modelcontextprotocol.io/extensions/apps/overview)
