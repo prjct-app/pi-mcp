@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add `npm run build:pi`: a compiled local build in `~/.pi/agent/builds/<package>` that Pi loads instead of the TypeScript sources.
 - Load the MCP SDK and build MCP services on first use instead of at startup, saving ~90ms on every Pi and subagent start.
 - Improve MCP tool rows with action-aware progress and errors, exact server-state summaries, semantic theme colors, safe expandable discovery trees, bounded slash-command lists, and bounded OAuth-link display.
 - Document secure official hosted MCP configurations for Notion, Stripe, and GitHub.
