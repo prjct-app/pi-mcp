@@ -1,22 +1,34 @@
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type } from 'typebox';
-import { AuthRequired, OAuthManager, machineAuthProvider, type SecretStore } from './auth.ts';
+import type { OAuthManager, SecretStore } from './auth.ts';
 import { loadConfig, type ServerConfig } from './config.ts';
-import { McpRuntime, abortable } from './runtime.ts';
+import type { McpRuntime } from './runtime.ts';
 import { renderCall, renderResult } from './render.ts';
-import { AuthLinks, AuthLinkError, type LoginResult } from './login.ts';
+import type { AuthLinks, LoginResult } from './login.ts';
 import { Output, plain } from './output.ts';
 
 const HELP = '/mcp status | tools <server> | reconnect <server> | auth <server>';
 const COMMAND_TOOL_LIMIT = 20;
 const ACTIONS = ['status', 'tools', 'call', 'resources', 'templates', 'read', 'prompts', 'prompt', 'complete'] as const;
-interface Services { runtime: McpRuntime; auth: OAuthManager; servers: Record<string, ServerConfig>; links: AuthLinks }
+/**
+ * The MCP SDK costs ~90ms to import, paid on every Pi start (and every
+ * subagent child) even when no MCP tool is ever called. It loads on first use.
+ */
+type Modules = Readonly<{ auth: typeof import('./auth.ts'); runtime: typeof import('./runtime.ts'); login: typeof import('./login.ts') }>;
+const loaded: { modules?: Promise<Modules>; ready?: Modules } = {};
+function loadModules(): Promise<Modules> {
+  loaded.modules ??= Promise.all([import('./auth.ts'), import('./runtime.ts'), import('./login.ts')])
+    .then(([auth, runtime, login]) => { loaded.ready = { auth, runtime, login }; return loaded.ready; });
+  return loaded.modules;
+}
+interface Services { runtime: McpRuntime; auth: OAuthManager; servers: Record<string, ServerConfig>; links: AuthLinks; modules: Modules }
 type Session = Readonly<{ pending?: Promise<Services>; closed: boolean }>;
 
 /** Keep remote error bodies, endpoints, and authorization data out of diagnostics. */
 function diagnostic(error: unknown): string {
-  if (error instanceof AuthRequired || error instanceof AuthLinkError) return error.message;
+  const modules = loaded.ready;
+  if (modules && (error instanceof modules.auth.AuthRequired || error instanceof modules.login.AuthLinkError)) return (error as Error).message;
   if (error instanceof Error && /closed|cancelled|aborted/i.test(error.message)) return 'MCP operation cancelled or session closed.';
   const code = (error as { code?: unknown } | null)?.code;
   return `MCP operation failed${typeof code === 'number' || typeof code === 'string' ? ` (${plain(String(code)).slice(0, 80)})` : ''}. Check configuration/authentication; use /mcp reconnect <server> to reset a failed connection. No operation was automatically replayed by pi-mcp.`;
@@ -51,11 +63,12 @@ export function installMcp(pi: ExtensionAPI, options: {
     if (get().closed) return Promise.reject(new Error('MCP session is closed'));
     const pending = get().pending;
     if (pending) return pending;
-    const loading = loadConfig({
+    const loading = Promise.all([loadConfig({
       cwd: ctx.cwd, agentDir: options.agentDir ?? getAgentDir(), configDirName: CONFIG_DIR_NAME,
       trusted: ctx.isProjectTrusted(), sharedConfigPath: options.sharedConfigPath,
-    }).then(servers => {
+    }), loadModules()]).then(([servers, modules]) => {
       if (get().closed) throw new Error('MCP session is closed');
+      const { auth: { OAuthManager, machineAuthProvider, AuthRequired }, runtime: { McpRuntime }, login: { AuthLinks } } = modules;
       const auth = new OAuthManager(servers, options.secretStore, options.fetchFn);
       const runtime = new McpRuntime(servers, (name, config) => {
         if (config.auth === 'oauth' && config.oauth?.grantType === 'client_credentials') return machineAuthProvider(name, config);
@@ -76,14 +89,14 @@ export function installMcp(pi: ExtensionAPI, options: {
             : `MCP authorization for ${name} ${reason ?? 'did not complete'}. Do not retry automatically; /mcp auth ${name} requests a fresh link.`,
         }, { triggerTurn: success, deliverAs: 'followUp' });
       }, options.authTimeoutMs);
-      return { runtime, auth, servers, links };
+      return { runtime, auth, servers, links, modules };
     });
     set({ pending: loading });
     return loading;
   }
 
   async function requestLink(active: Services, name: string, ctx: ExtensionContext): Promise<LoginResult> {
-    if (ctx.mode !== 'tui' && ctx.mode !== 'rpc') throw new AuthRequired(name);
+    if (ctx.mode !== 'tui' && ctx.mode !== 'rpc') throw new active.modules.auth.AuthRequired(name);
     return active.links.request(name);
   }
 
@@ -94,7 +107,7 @@ export function installMcp(pi: ExtensionAPI, options: {
       return await operation();
     } catch (error) {
       signal?.throwIfAborted();
-      if (error instanceof AuthRequired && active.servers[name]?.auth === 'oauth' && active.servers[name]?.oauth?.grantType !== 'client_credentials') return requestLink(active, name, ctx);
+      if (error instanceof active.modules.auth.AuthRequired && active.servers[name]?.auth === 'oauth' && active.servers[name]?.oauth?.grantType !== 'client_credentials') return requestLink(active, name, ctx);
       throw error;
     }
   }
@@ -160,7 +173,7 @@ export function installMcp(pi: ExtensionAPI, options: {
           default: throw new Error('Unknown MCP action');
         }
       };
-      const result = await abortable(run(active, params.server, ctx, operation, signal), signal).catch(error => { throw new Error(diagnostic(error)); });
+      const result = await active.modules.runtime.abortable(run(active, params.server, ctx, operation, signal), signal).catch(error => { throw new Error(diagnostic(error)); });
       const rendered = await output.result(result);
       if ((result as { isError?: boolean } | null)?.isError) {
         throw new Error(rendered.content.filter(block => block.type === 'text').map(block => block.text).join('\n'));
@@ -208,7 +221,6 @@ export function installMcp(pi: ExtensionAPI, options: {
     const previous = get().pending;
     set({ pending: undefined });
     await dispose(await previous?.catch(() => undefined));
-    await services(ctx);
   });
   pi.on('session_shutdown', async () => {
     set({ closed: true });
