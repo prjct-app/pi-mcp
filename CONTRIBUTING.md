@@ -15,4 +15,5 @@
 - Honor project trust before loading project-local server configuration or commands.
 - Test at approved boundaries: MCP client vs local protocol fixtures, and Pi extension tool/command/lifecycle API.
 - Run `npm run check`, `npm test`, `npm run check:package` before review.
+- Build the compiled local copy Pi loads with `npm run build:pi`. It writes `~/.pi/agent/builds/<package>` outside the repository, because compiled code inside it would load the repository's development copy of Pi instead of the host's.
 - Never push, create or merge a PR, publish, or deploy without explicit user authorization.
