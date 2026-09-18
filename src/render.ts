@@ -55,7 +55,7 @@ export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result
   const suffix = truncated ? ' · agent output truncated' : '';
   const states = action === 'status' && items ? items.map(item => label(record(item).state)).filter(Boolean) : [];
   const stateCount = (state: string) => states.filter(value => value === state).length;
-  const statusOrder = ['connected', 'connecting', 'resetting', 'failed', 'idle', 'disabled'] as const;
+  const statusOrder = ['connected', 'connecting', 'resetting', 'failed', 'idle', 'disconnected', 'disabled'] as const;
   const statusCounts = statusOrder.map(state => ({ state, total: stateCount(state) })).filter(entry => entry.total > 0);
   const knownStates = statusCounts.reduce((sum, entry) => sum + entry.total, 0);
   const failed = stateCount('failed');

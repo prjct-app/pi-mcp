@@ -142,7 +142,7 @@ export class AuthLinks {
           if (!this.closed) this.notify(name, true);
         }, () => {
           this.auth.cancel(name);
-          if (this.closed) return;
+          if (this.closed || this.pending.get(name)?.controller !== controller) return; // Closed or cancelled by the user.
           const reason = controller.signal.aborted ? 'expired' : 'rejected';
           const result: LoginResult = { status: 'authorization_failed', server: name, message: `Authorization ${reason}. Run /mcp auth ${name} to request a fresh link.` };
           this.pending.set(name, { starting: Promise.resolve(result), controller, failed: true });
@@ -155,6 +155,22 @@ export class AuthLinks {
         message: 'Show this link to the user once. They click and approve; Pi receives the callback automatically and notifies you when ready. Do not open a browser, ask for a pasted callback, or poll/retry while approval is pending. No operation is automatically replayed; check any previous ambiguous failure before retrying a mutation.',
       };
     } catch (error) { receiver.release(); this.auth.cancel(name); throw error; }
+  }
+
+  /** True while a link was issued and its callback has not arrived. */
+  isPending(name: string): boolean {
+    const pending = this.pending.get(name);
+    return Boolean(pending && !pending.failed);
+  }
+
+  /** Abandon an issued link quietly; the agent is not notified. */
+  cancel(name: string): boolean {
+    const pending = this.pending.get(name);
+    if (!pending) return false;
+    this.pending.delete(name);
+    pending.controller.abort();
+    this.auth.cancel(name);
+    return !pending.failed;
   }
 
   async close() {

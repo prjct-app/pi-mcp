@@ -7,8 +7,10 @@ import type { McpRuntime } from './runtime.ts';
 import { renderCall, renderResult } from './render.ts';
 import type { AuthLinks, LoginResult } from './login.ts';
 import { Output, plain } from './output.ts';
+import { manageServers, describeAuth, type Action, type Outcome, type ServerControl, type ServerInfo } from './manage.ts';
 
-const HELP = '/mcp status | tools <server> | reconnect <server> | auth <server>';
+const HELP = '/mcp (interactive) | status | tools <server> | connect <server> | disconnect <server> | reconnect <server> | auth <server> | logout <server>';
+const COMMANDS = ['status', 'tools', 'connect', 'disconnect', 'reconnect', 'auth', 'logout'] as const;
 const COMMAND_TOOL_LIMIT = 20;
 const ACTIONS = ['status', 'tools', 'call', 'resources', 'templates', 'read', 'prompts', 'prompt', 'complete'] as const;
 /**
@@ -28,7 +30,7 @@ type Session = Readonly<{ pending?: Promise<Services>; closed: boolean }>;
 /** Keep remote error bodies, endpoints, and authorization data out of diagnostics. */
 function diagnostic(error: unknown): string {
   const modules = loaded.ready;
-  if (modules && (error instanceof modules.auth.AuthRequired || error instanceof modules.login.AuthLinkError)) return (error as Error).message;
+  if (modules && (error instanceof modules.auth.AuthRequired || error instanceof modules.login.AuthLinkError || error instanceof modules.runtime.ServerOffline)) return (error as Error).message;
   if (error instanceof Error && /closed|cancelled|aborted/i.test(error.message)) return 'MCP operation cancelled or session closed.';
   const code = (error as { code?: unknown } | null)?.code;
   return `MCP operation failed${typeof code === 'number' || typeof code === 'string' ? ` (${plain(String(code)).slice(0, 80)})` : ''}. Check configuration/authentication; use /mcp reconnect <server> to reset a failed connection. No operation was automatically replayed by pi-mcp.`;
@@ -80,7 +82,7 @@ export function installMcp(pi: ExtensionAPI, options: {
           return token;
         } };
       });
-      const links = new AuthLinks(auth, name => runtime.reconnect(name), (name, success, reason) => {
+      const links = new AuthLinks(auth, name => { runtime.enable(name); return runtime.reconnect(name); }, (name, success, reason) => {
         if (get().closed) return;
         pi.sendMessage({
           customType: 'mcp-auth', display: true,
@@ -182,32 +184,85 @@ export function installMcp(pi: ExtensionAPI, options: {
     },
   });
 
+  const interactiveOAuth = (config?: ServerConfig) => config?.auth === 'oauth' && config.oauth?.grantType !== 'client_credentials';
+
+  async function describe(active: Services): Promise<ServerInfo[]> {
+    return Promise.all(active.runtime.status().map(async ({ name, state, era }): Promise<ServerInfo> => {
+      const config = active.servers[name]!;
+      const endpoint = config.url ? new URL(config.url).origin : `stdio: ${config.command ?? ''}`;
+      if (config.auth === 'bearer') return { name, state, era, endpoint, auth: 'bearer', env: config.bearerTokenEnv, credential: process.env[config.bearerTokenEnv ?? ''] ? 'env_set' : 'env_missing' };
+      if (config.auth === 'oauth' && config.oauth?.grantType === 'client_credentials') {
+        return { name, state, era, endpoint, auth: 'machine', env: config.oauth.clientSecretEnv, credential: process.env[config.oauth.clientSecretEnv ?? ''] ? 'env_set' : 'env_missing' };
+      }
+      if (config.auth !== 'oauth' || config.disabled) return { name, state, era, endpoint, auth: config.auth === 'oauth' ? 'oauth' : 'none' };
+      const credential = active.links.isPending(name) ? 'pending' as const : await active.auth.status(name).catch(() => 'unavailable' as const);
+      return { name, state, era, endpoint, auth: 'oauth', credential };
+    }));
+  }
+
+  function linkOutcome(name: string, login: LoginResult): Outcome {
+    return { message: loginNotice(name, login), level: login.status === 'authorization_failed' ? 'warning' : 'info', leave: true };
+  }
+
+  async function perform(active: Services, ctx: ExtensionContext, name: string, action: Action): Promise<Outcome> {
+    const { runtime, links, auth, servers } = active;
+    const label = plain(name);
+    switch (action) {
+      case 'tools':
+      case 'connect':
+      case 'reconnect': {
+        if (action !== 'tools') { runtime.enable(name); await runtime.reconnect(name); }
+        const result = await run(active, name, ctx, () => runtime.tools(name));
+        if (!Array.isArray(result)) return linkOutcome(name, result as LoginResult);
+        return action === 'tools'
+          ? { message: formatToolNotice(name, result), level: 'info', leave: true }
+          : { message: `${label} connected · ${result.length} tool${result.length === 1 ? '' : 's'} advertised.`, level: 'info' };
+      }
+      case 'disconnect':
+        await runtime.disconnect(name);
+        return { message: `${label} disconnected for this session. Calls fail until /mcp connect ${label}.`, level: 'info' };
+      case 'auth':
+      case 'link':
+        if (servers[name]?.oauth?.grantType === 'client_credentials') return { message: `MCP server ${label} uses non-interactive machine OAuth; configure its clientSecretEnv environment variable.`, level: 'info' };
+        if (!interactiveOAuth(servers[name])) return { message: `MCP server ${label} does not use OAuth.`, level: 'info' };
+        return linkOutcome(name, await links.request(name, action === 'auth'));
+      case 'cancel':
+        return links.cancel(name)
+          ? { message: `Pending authorization for ${label} cancelled. The previous link no longer works.`, level: 'info' }
+          : { message: `No pending authorization for ${label}.`, level: 'info' };
+      case 'logout':
+        if (!interactiveOAuth(servers[name])) return { message: `MCP server ${label} has no saved OAuth credentials; its credentials come from the environment.`, level: 'info' };
+        links.cancel(name);
+        await auth.logout(name);
+        await runtime.reconnect(name);
+        return { message: `Signed out of ${label}. Saved credentials were removed; /mcp auth ${label} signs in again.`, level: 'info' };
+      default: return { message: HELP, level: 'info' };
+    }
+  }
+
   pi.registerCommand('mcp', {
-    description: 'MCP status, tool discovery, connection reset, and user-clickable OAuth links',
-    getArgumentCompletions: prefix => ['status', 'tools', 'reconnect', 'auth'].filter(command => command.startsWith(prefix)).map(value => ({ value, label: value })),
+    description: 'Manage MCP servers: status, tools, connect/disconnect, and OAuth sign-in/sign-out',
+    getArgumentCompletions: prefix => COMMANDS.filter(command => command.startsWith(prefix)).map(value => ({ value, label: value })),
     handler: async (args, ctx) => {
       if (!ctx.hasUI) throw new Error('Use the mcp tool in print/JSON mode. Manual OAuth requires interactive or RPC dialogs.');
-      const [command = 'status', name, ...extra] = args.trim().split(/\s+/).filter(Boolean);
-      if (extra.length || (command !== 'status' && !name)) { ctx.ui.notify(HELP, 'info'); return; }
+      const [command, name, ...extra] = args.trim().split(/\s+/).filter(Boolean);
+      if (extra.length || (command && command !== 'status' && !name) || (command && !(COMMANDS as readonly string[]).includes(command))) { ctx.ui.notify(HELP, 'info'); return; }
       try {
         const active = await services(ctx);
-        const { runtime, links, servers } = active;
-        if (command === 'status') { ctx.ui.notify(runtime.status().map(server => `${server.name}: ${server.state}${server.era ? ` (${server.era})` : ''}`).join('\n') || 'No MCP servers configured.', 'info'); return; }
-        if (command === 'tools') {
-          const result = await run(active, name!, ctx, () => runtime.tools(name!));
-          if (!Array.isArray(result)) {
-            const login = result as LoginResult;
-            ctx.ui.notify(loginNotice(name!, login), login.status === 'authorization_failed' ? 'warning' : 'info');
-            return;
-          }
-          ctx.ui.notify(formatToolNotice(name!, result), 'info');
+        const control: ServerControl = {
+          describe: () => describe(active),
+          perform: (server, action) => perform(active, ctx, server, action).catch(error => ({ message: diagnostic(error), level: 'error' as const })),
+        };
+        if (!command) { await manageServers(ctx, control); return; }
+        if (command === 'status') {
+          const servers = await describe(active);
+          ctx.ui.notify(servers.map(server => `${plain(server.name)}: ${server.state}${server.era ? ` (${server.era})` : ''} · ${describeAuth(server)}`).join('\n') || 'No MCP servers configured.', 'info');
           return;
         }
-        if (command === 'reconnect') { await runtime.reconnect(name!); ctx.ui.notify('Connection reset. It will connect on the next call.', 'info'); return; }
-        if (command !== 'auth') { ctx.ui.notify(HELP, 'info'); return; }
-        if (servers[name!]?.oauth?.grantType === 'client_credentials') { ctx.ui.notify(`MCP server ${name} uses non-interactive machine OAuth; configure its clientSecretEnv environment variable.`, 'info'); return; }
-        const result = await links.request(name!, true);
-        ctx.ui.notify(loginNotice(name!, result), result.status === 'authorization_failed' ? 'warning' : 'info');
+        if (!Object.hasOwn(active.servers, name!)) { ctx.ui.notify(`Unknown MCP server: ${plain(name!)}. Run /mcp status.`, 'warning'); return; }
+        if (active.servers[name!]?.disabled) { ctx.ui.notify(`MCP server ${plain(name!)} is disabled in mcp.json.`, 'info'); return; }
+        const outcome = await perform(active, ctx, name!, command === 'auth' ? 'auth' : command as Action);
+        ctx.ui.notify(outcome.message, outcome.level);
       } catch (error) { ctx.ui.notify(diagnostic(error), 'error'); }
     },
   });
