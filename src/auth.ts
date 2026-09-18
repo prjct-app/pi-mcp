@@ -33,8 +33,14 @@ export class KeyringSecrets implements SecretStore {
   }
   async get(key: string) { return (await this.entry(key)).getPassword(); }
   async set(key: string, value: string) { await (await this.entry(key)).setPassword(value); }
-  async delete(key: string) { await (await this.entry(key)).deleteCredential(); }
+  async delete(key: string) {
+    const entry = await this.entry(key);
+    // A missing entry is already deleted; anything still readable is a real failure.
+    await entry.deleteCredential().catch(async error => { if (await entry.getPassword().catch(() => undefined)) throw error; });
+  }
 }
+
+export type AuthStatus = 'authorized' | 'refreshable' | 'expired' | 'reauthorize' | 'signed_out' | 'unavailable';
 
 export class AuthRequired extends Error {
   constructor(name: string) { super(`MCP authorization required. Run /mcp auth ${name}. No browser was opened.`); }
@@ -312,6 +318,30 @@ export class OAuthManager {
       });
     }, this.shutdown.signal);
     updateAccount(account, { blocked: false });
+  }
+
+  /** Local credential state only; never contacts the network or refreshes. */
+  async status(name: string): Promise<AuthStatus> {
+    const account = this.account(name);
+    if (account.current.blocked) return 'reauthorize';
+    // Another Pi session may have signed in or out since this one last read the keyring.
+    const record = await this.reloadRecord(account).catch(() => undefined);
+    if (!record) return 'unavailable';
+    const saved = record.activeIssuer ? record.issuers[record.activeIssuer] : undefined;
+    if (!saved?.tokens) return 'signed_out';
+    if (saved.expiresAt === undefined || saved.expiresAt > Date.now() + 30000) return 'authorized';
+    return saved.tokens.refresh_token ? 'refreshable' : 'expired';
+  }
+
+  /** Forget this server's local credentials. Tokens are not revoked at the authorization server. */
+  async logout(name: string): Promise<void> {
+    const account = this.account(name);
+    updateAccount(account, { flow: undefined });
+    await this.store.withLock(account.key, async () => {
+      try { await this.store.delete(account.key); }
+      catch { throw new Error('Cannot remove secure MCP credentials. Unlock the OS keyring and try again.'); }
+    }, this.shutdown.signal);
+    updateAccount(account, { record: Promise.resolve({ version: 1, binding: account.binding, issuers: {} }), blocked: false, lastRefresh: 0 });
   }
 
   cancel(name: string) { const account = this.accounts.get(name); if (account) updateAccount(account, { flow: undefined }); }

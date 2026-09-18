@@ -23,10 +23,17 @@ export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise
   });
 }
 
+/** The user disconnected this server; the message is safe to show and tells how to undo it. */
+export class ServerOffline extends Error {
+  constructor(name: string) { super(`MCP server ${name} was disconnected by the user for this session. Ask the user before using it; /mcp connect ${name} restores it.`); }
+}
+
 export class McpRuntime {
   private readonly connections = new Map<string, Connection>();
   private readonly shutdown = new AbortController();
   private readonly slot: { closing?: Promise<void> } = {};
+  /** Servers the user disconnected for this session; calls fail until they reconnect. */
+  private readonly offline = new Set<string>();
 
   constructor(
     private readonly servers: Record<string, ServerConfig>,
@@ -36,7 +43,7 @@ export class McpRuntime {
 
   status() {
     return Object.entries(this.servers).map(([name, config]) => ({
-      name, state: config.disabled ? 'disabled' : this.connections.get(name)?.state ?? 'idle',
+      name, state: config.disabled ? 'disabled' : this.offline.has(name) ? 'disconnected' : this.connections.get(name)?.state ?? 'idle',
       era: this.connections.get(name)?.client.getProtocolEra(),
     }));
   }
@@ -57,6 +64,7 @@ export class McpRuntime {
     if (this.shutdown.signal.aborted) throw new Error('MCP runtime is closed');
     signal?.throwIfAborted();
     const config = this.config(name);
+    if (this.offline.has(name)) throw new ServerOffline(name);
     const existing = this.connections.get(name);
     if (existing?.state === 'failed' || existing?.state === 'resetting') throw new Error(`MCP server ${name} is unavailable. Use /mcp reconnect ${name}.`);
     if (existing) return abortable(existing.ready, signal);
@@ -149,6 +157,19 @@ export class McpRuntime {
   async prompt(name: string, prompt: string, args: Record<string, string>, signal?: AbortSignal) {
     const client = await this.connect(name, signal);
     return client.getPrompt({ name: prompt, arguments: args }, this.requestOptions(name, signal));
+  }
+
+  /** Close the connection and refuse new ones until {@link connect}. */
+  async disconnect(name: string): Promise<void> {
+    this.config(name);
+    this.offline.add(name);
+    await this.reconnect(name);
+  }
+
+  /** Allow connections again after {@link disconnect}; connecting stays lazy. */
+  enable(name: string): void {
+    this.config(name);
+    this.offline.delete(name);
   }
 
   async reconnect(name: string): Promise<void> {
