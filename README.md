@@ -82,19 +82,23 @@ Reads `mcp.json` files in this order (later entries replace servers entirely, no
 
 Requires an exact HTTPS issuer. No redirect URIs or client metadata docs. The secret is read from the environment variable only when connecting; acquired tokens live in session memory only.
 
-### Examples: Notion, Stripe, GitHub
+### Examples: Notion, Stripe, GitHub, Supabase, Mobbin
 
 ```json
 {
   "mcpServers": {
     "notion": { "url": "https://mcp.notion.com/mcp", "auth": "oauth" },
     "stripe": { "url": "https://mcp.stripe.com", "auth": "bearer", "bearerTokenEnv": "STRIPE_API_KEY" },
-    "github": { "url": "https://api.githubcopilot.com/mcp/", "auth": "bearer", "bearerTokenEnv": "GITHUB_PERSONAL_ACCESS_TOKEN" }
+    "github": { "url": "https://api.githubcopilot.com/mcp/", "auth": "bearer", "bearerTokenEnv": "GITHUB_PERSONAL_ACCESS_TOKEN" },
+    "supabase": { "url": "https://mcp.supabase.com/mcp", "auth": "oauth" },
+    "mobbin": { "url": "https://api.mobbin.com/mcp", "auth": "oauth" }
   }
 }
 ```
 
-Official references: [Notion MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp), [Stripe MCP](https://docs.stripe.com/mcp), [GitHub remote MCP](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md).
+Official references: [Notion MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp), [Stripe MCP](https://docs.stripe.com/mcp), [GitHub remote MCP](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md), [Supabase MCP](https://supabase.com/docs/guides/getting-started/mcp), [Mobbin MCP](https://docs.mobbin.com/mcp/introduction).
+
+Supabase accepts `?project_ref=<ref>&read_only=true` on the URL to scope the server to one project and a read-only Postgres role; `features=database,docs` limits the tool groups. For CI, use `"auth": "bearer", "bearerTokenEnv": "SUPABASE_ACCESS_TOKEN"` with a personal access token instead of OAuth.
 
 ---
 
@@ -102,10 +106,16 @@ Official references: [Notion MCP](https://developers.notion.com/guides/mcp/get-s
 
 | Command | Result |
 |---|---|
-| `/mcp` or `/mcp status` | Connection state (does not connect) |
+| `/mcp` | Interactive manager: pick a server, see its connection and credential state, and act on it |
+| `/mcp status` | Connection and credential state per server (does not connect) |
 | `/mcp tools <server>` | Compact list of up to 20 tools (connects on demand) |
-| `/mcp reconnect <server>` | Close/reset the connection |
-| `/mcp auth <server>` | Request an authorization link |
+| `/mcp connect <server>` | Connect now and report the advertised tool count; undoes `disconnect` |
+| `/mcp disconnect <server>` | Close the connection and refuse new ones for this session |
+| `/mcp reconnect <server>` | Reset the connection and connect again |
+| `/mcp auth <server>` | Request a fresh authorization link (also re-authenticates a signed-in server) |
+| `/mcp logout <server>` | Forget the server's saved OAuth credentials (asks for confirmation in the manager) |
+
+The manager shows only actions that fit the server's state: connect, list tools, reconnect, disconnect, authenticate or re-authenticate, show or cancel a pending authorization link, and sign out. Credential state is read locally (OS keyring or environment) and never triggers network calls. Signing out removes local credentials only; tokens are not revoked at the provider. It uses Pi's standard dialogs, so it works in the TUI and over RPC.
 
 ## OAuth flow
 

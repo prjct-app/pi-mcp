@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Document Supabase and Mobbin remote MCP servers (OAuth) in the README examples.
 - Add an interactive `/mcp` manager and `connect`, `disconnect`, and `logout` subcommands: per-server connection and credential state, re-authentication, cancelling a pending link, session-scoped disconnect, and OAuth sign-out.
 - Add `npm run build:pi`: a compiled local build in `~/.pi/agent/builds/<package>` that Pi loads instead of the TypeScript sources.
 - Load the MCP SDK and build MCP services on first use instead of at startup, saving ~90ms on every Pi and subagent start.
