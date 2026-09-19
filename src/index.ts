@@ -5,6 +5,7 @@ import type { OAuthManager, SecretStore } from './auth.ts';
 import { loadConfig, type ServerConfig } from './config.ts';
 import type { McpRuntime } from './runtime.ts';
 import { renderCall, renderResult } from './render.ts';
+import { brand, completer } from '@prjct.app/pi-tui-kit';
 import type { AuthLinks, LoginResult } from './login.ts';
 import { Output, plain } from './output.ts';
 import { manageServers, describeAuth, type Action, type Outcome, type ServerControl, type ServerInfo } from './manage.ts';
@@ -60,6 +61,8 @@ export function installMcp(pi: ExtensionAPI, options: {
   const get = () => slot.current;
   const set = (update: Partial<Session>) => { slot.current = { ...get(), ...update }; };
   const output = new Output();
+  /** Server names from the last loaded config, for completions (which get no context). */
+  const known = { servers: [] as string[] };
 
   function services(ctx: ExtensionContext): Promise<Services> {
     if (get().closed) return Promise.reject(new Error('MCP session is closed'));
@@ -70,6 +73,7 @@ export function installMcp(pi: ExtensionAPI, options: {
       trusted: ctx.isProjectTrusted(), sharedConfigPath: options.sharedConfigPath,
     }), loadModules()]).then(([servers, modules]) => {
       if (get().closed) throw new Error('MCP session is closed');
+      known.servers = Object.keys(servers).sort();
       const { auth: { OAuthManager, machineAuthProvider, AuthRequired }, runtime: { McpRuntime }, login: { AuthLinks } } = modules;
       const auth = new OAuthManager(servers, options.secretStore, options.fetchFn);
       const runtime = new McpRuntime(servers, (name, config) => {
@@ -242,8 +246,19 @@ export function installMcp(pi: ExtensionAPI, options: {
   }
 
   pi.registerCommand('mcp', {
-    description: 'Manage MCP servers: status, tools, connect/disconnect, and OAuth sign-in/sign-out',
-    getArgumentCompletions: prefix => COMMANDS.filter(command => command.startsWith(prefix)).map(value => ({ value, label: value })),
+    description: brand('MCP servers: panel, status, connect, tools, sign-in'),
+    getArgumentCompletions: completer(() => {
+      const servers = (what: string) => () => known.servers.map(name => ({ value: name, description: `${what} ${name}` }));
+      return [
+        { value: 'status', description: 'every server, one line each' },
+        { value: 'connect', description: 'connect a server', options: servers('connect') },
+        { value: 'tools', description: 'list what a server advertises', options: servers('list tools of') },
+        { value: 'reconnect', description: 'drop and reconnect a server', options: servers('reconnect') },
+        { value: 'disconnect', description: 'disconnect for this session', options: servers('disconnect') },
+        { value: 'auth', description: 'sign in with OAuth', options: servers('sign in to') },
+        { value: 'logout', description: 'forget saved credentials', options: servers('sign out of') },
+      ];
+    }),
     handler: async (args, ctx) => {
       if (!ctx.hasUI) throw new Error('Use the mcp tool in print/JSON mode. Manual OAuth requires interactive or RPC dialogs.');
       const [command, name, ...extra] = args.trim().split(/\s+/).filter(Boolean);
@@ -277,6 +292,11 @@ export function installMcp(pi: ExtensionAPI, options: {
     const previous = get().pending;
     set({ pending: undefined });
     await dispose(await previous?.catch(() => undefined));
+    // Names only, for /mcp completions: reading the config starts no server.
+    void loadConfig({
+      cwd: ctx.cwd, agentDir: options.agentDir ?? getAgentDir(), configDirName: CONFIG_DIR_NAME,
+      trusted: ctx.isProjectTrusted(), sharedConfigPath: options.sharedConfigPath,
+    }).then(servers => { known.servers = Object.keys(servers).sort(); }).catch(() => undefined);
   });
   pi.on('session_shutdown', async () => {
     set({ closed: true });
