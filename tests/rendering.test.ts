@@ -110,23 +110,25 @@ test('headers hide raw arguments and compact renderers handle errors, progress, 
     const tool = host.tools.get('mcp')!;
     const args = { action: 'call', server: 'fixture', tool: 'echo', args: { text: 'PRIVATE_ARGUMENT' } };
     const context = { args, expanded: false, isError: false, isPartial: false, state: {}, invalidate() {} } as RenderContext;
-    const header = tool.renderCall!(args, theme, context);
-    assert.match(header.render(100).join('\n'), /fixture.*echo/);
+    const running = { ...context, isPartial: true } as RenderContext;
+    const header = tool.renderCall!(args, theme, running);
+    assert.match(header.render(100).join('\n'), /MCP +fixture · echo +working…/, 'one row while it runs');
+    assert.deepEqual(tool.renderCall!(args, theme, context).render(100), [], 'the result row replaces it once settled');
     assert.doesNotMatch(header.render(100).join('\n'), /PRIVATE_ARGUMENT/);
-    const readHeader = tool.renderCall!({ action: 'read', server: 'fixture', uri: 'private://resource?token=PRIVATE_URI' }, theme, context);
+    const readHeader = tool.renderCall!({ action: 'read', server: 'fixture', uri: 'private://resource?token=PRIVATE_URI' }, theme, running);
     assert.doesNotMatch(readHeader.render(100).join('\n'), /PRIVATE_URI|token=/);
     const result = { content: [{ type: 'text' as const, text: 'PRIVATE_RESPONSE' }], details: {} };
     const error = tool.renderResult!(result, { expanded: true, isPartial: false }, theme, { ...context, isError: true });
     assert.match(error.render(100).join('\n'), /failed/);
     assert.doesNotMatch(error.render(100).join('\n'), /PRIVATE_RESPONSE/);
     const progress = tool.renderResult!(result, { expanded: false, isPartial: true }, theme, context);
-    assert.match(progress.render(100).join('\n'), /Working/);
+    assert.deepEqual(progress.render(100), [], 'progress shows on the call row');
     for (const component of [header, error, progress]) {
       for (const width of [8, 20, 80]) assert.ok(component.render(width).every(line => visibleWidth(line) <= width));
     }
     const color = { prefix: 'first' };
     const changingTheme = { ...theme, fg: (_color: unknown, value: string) => `${color.prefix} ${value}` } as Theme;
-    const themed = tool.renderCall!(args, changingTheme, context);
+    const themed = tool.renderCall!(args, changingTheme, running);
     assert.match(themed.render(100).join('\n'), /first/);
     color.prefix = 'second'; themed.invalidate();
     assert.match(themed.render(100).join('\n'), /second/);

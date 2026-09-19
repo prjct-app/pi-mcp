@@ -1,5 +1,6 @@
 import type { Theme, ToolDefinition } from '@earendil-works/pi-coding-agent';
-import { Text, type Component } from '@earendil-works/pi-tui';
+import { Container, Text, type Component } from '@earendil-works/pi-tui';
+import { SYMBOL, row, type Tone } from '@prjct.app/pi-tui-kit';
 import { plain } from './output.ts';
 
 type Color = 'toolTitle' | 'muted' | 'dim' | 'success' | 'warning' | 'error';
@@ -30,13 +31,18 @@ function lines(theme: Theme, values: readonly Line[]): Component {
   };
 }
 
-export const renderCall: NonNullable<ToolDefinition['renderCall']> = (args, theme) =>
-  lines(theme, [{ color: 'toolTitle', value: `MCP · ${operation(args)}` }]);
+/** The row every tool call uses: symbol, verb, what it acted on, and the outcome. */
+const mcpRow = (theme: Theme, request: string, symbol: string, tone: Tone, meta: string, metaTone?: Tone): Component =>
+  row(theme, { symbol, tone, verb: 'MCP', target: request, meta, ...(metaTone ? { metaTone } : {}) });
+
+/** While the call runs its row is the call; once settled the result row replaces it. */
+export const renderCall: NonNullable<ToolDefinition['renderCall']> = (args, theme, context) =>
+  context?.isPartial === false ? new Container() : mcpRow(theme, operation(args), SYMBOL.active, 'accent', 'working…');
 
 export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result, { expanded, isPartial }, theme, context) => {
   const request = operation(context.args);
-  if (isPartial) return lines(theme, [{ color: 'warning', value: `○ ${request} · Working…` }]);
-  if (context.isError) return lines(theme, [{ color: 'error', value: `✗ ${request} failed · see the agent’s explanation` }]);
+  if (isPartial) return new Container();
+  if (context.isError) return mcpRow(theme, request, SYMBOL.error, 'error', 'failed · see the reply', 'error');
   const content = result.content.find(block => block.type === 'text');
   const parse = (): unknown => {
     try { return content?.type === 'text' ? JSON.parse(content.text) : undefined; }
@@ -44,8 +50,8 @@ export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result
   };
   const value = parse();
   const data = record(value);
-  if (data.status === 'authorization_required') return lines(theme, [{ color: 'warning', value: `! ${request} · authorization required; use the link in the agent’s reply` }]);
-  if (data.status === 'authorization_failed') return lines(theme, [{ color: 'warning', value: `! ${request} · authorization expired or rejected; request a fresh link` }]);
+  if (data.status === 'authorization_required') return mcpRow(theme, request, SYMBOL.attention, 'warning', 'sign-in needed · link in the reply', 'warning');
+  if (data.status === 'authorization_failed') return mcpRow(theme, request, SYMBOL.attention, 'warning', 'sign-in expired · /mcp', 'warning');
 
   const action = label(record(context.args).action);
   const items = action === 'tools' && Array.isArray(data.items) ? data.items : Array.isArray(value) ? value : undefined;
@@ -64,11 +70,12 @@ export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result
     ? [plural(total, 'server'), ...statusCounts.map(entry => `${entry.total} ${entry.state}`), ...(total > knownStates ? [`${total - knownStates} unknown`] : [])].join(' · ')
     : undefined;
   const summary = action === 'status' && statusSummary
-    ? `${failed ? '✗' : total && connected === total ? '✓' : '○'} ${statusSummary}${suffix}`
+    ? `${statusSummary}${suffix}`
     : unit && total !== undefined
-      ? `✓ ${plural(total, unit)}${items && total > items.length ? ` · ${items.length} shown` : ''}${suffix}`
-      : `✓ ${request} completed${suffix}`;
-  const summaryColor: Color = failed ? 'error' : truncated ? 'warning' : action === 'status' && (!total || connected !== total) ? 'muted' : 'success';
+      ? `${plural(total, unit)}${items && total > items.length ? ` · ${items.length} shown` : ''}${suffix}`
+      : `done${suffix}`;
+  const symbol = failed ? SYMBOL.error : truncated || (action === 'status' && (!total || connected !== total)) ? SYMBOL.idle : SYMBOL.ok;
+  const tone: Tone = failed ? 'error' : truncated ? 'warning' : action === 'status' && (!total || connected !== total) ? 'muted' : 'success';
 
   // Only bounded names/states are displayed on expansion, never schemas, descriptions,
   // raw arguments, response bodies, callback parameters, or authorization URLs.
@@ -86,5 +93,10 @@ export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result
     return { color, value: `  ${branch} ${item.name}${state}` };
   });
   if (expanded && total !== undefined && total > visible.length) details.push({ color: 'dim', value: `  └ … ${total - visible.length} more` });
-  return lines(theme, [{ color: summaryColor, value: summary }, ...details]);
+  const head = mcpRow(theme, request, symbol, tone, summary, truncated ? 'warning' : undefined);
+  if (!details.length) return head;
+  const container = new Container();
+  container.addChild(head);
+  container.addChild(lines(theme, details));
+  return container;
 };
