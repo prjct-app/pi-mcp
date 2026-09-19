@@ -127,3 +127,21 @@ test('a pending authorization can be cancelled quietly from the manager', async 
     assert.match(test.host.notices.at(-1)!, /oauth: signed out/);
   } finally { await test.close(); }
 });
+
+test('/mcp completes actions, then server names, with the prjct mark', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-complete-'));
+  await writeFile(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { linear: { url: 'https://mcp.linear.app/mcp', auth: 'oauth' }, local: { command: 'true' } } }));
+  const host = harness(dir);
+  try {
+    const mcp = host.commands.get('mcp');
+    assert.match(mcp.description, /^p · MCP servers/);
+    const first = await mcp.getArgumentCompletions('');
+    assert.deepEqual(first.map((item: any) => item.value), ['status', 'connect', 'tools', 'reconnect', 'disconnect', 'auth', 'logout']);
+    assert.match(first[1].description, /^p · connect a server$/);
+    await host.emit('session_start');
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const servers = await mcp.getArgumentCompletions('connect ');
+    assert.deepEqual(servers.map((item: any) => item.value), ['connect linear', 'connect local']);
+    assert.equal(servers[0].description, 'p · connect linear');
+  } finally { await host.emit('session_shutdown'); await rm(dir, { recursive: true, force: true }); }
+});
