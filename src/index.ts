@@ -214,9 +214,10 @@ export function installMcp(pi: ExtensionAPI, options: {
         if (action !== 'tools') { runtime.enable(name); await runtime.reconnect(name); }
         const result = await run(active, name, ctx, () => runtime.tools(name));
         if (!Array.isArray(result)) return linkOutcome(name, result as LoginResult);
+        const tools = result.map(tool => String(tool.name));
         return action === 'tools'
-          ? { message: formatToolNotice(name, result), level: 'info', leave: true }
-          : { message: `${label} connected · ${result.length} tool${result.length === 1 ? '' : 's'} advertised.`, level: 'info' };
+          ? { message: formatToolNotice(name, result), level: 'info', leave: true, tools }
+          : { message: `${label} connected · ${result.length} tool${result.length === 1 ? '' : 's'} advertised.`, level: 'info', tools };
       }
       case 'disconnect':
         await runtime.disconnect(name);
