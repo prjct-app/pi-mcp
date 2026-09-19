@@ -115,7 +115,7 @@ export function installMcp(pi: ExtensionAPI, options: {
   }
 
   pi.registerTool({
-    name: 'mcp', label: 'MCP', renderCall, renderResult,
+    name: 'mcp', label: 'MCP', renderShell: 'self', renderCall, renderResult,
     description: 'Use configured MCP servers: status, tools/call, resources/templates/read, prompts/prompt, and argument completion. Supports user OAuth links and non-interactive machine OAuth. No browser launches or HTML execution. Output is capped at 50 KiB / 2000 lines with private overflow files.',
     promptSnippet: 'Discover and call configured MCP tools without opening web interfaces',
     promptGuidelines: [
