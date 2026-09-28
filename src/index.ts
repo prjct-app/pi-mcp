@@ -6,7 +6,7 @@ import { loadConfig, type ServerConfig } from './config.ts';
 import type { McpRuntime } from './runtime.ts';
 import { AUTH_LINK_TYPE, publishAuthorizationLink, renderAuthorizationLink } from './auth-link.ts';
 import { connectJev, type ConnectJev, type Jev } from './jev.ts';
-import { banner, screen, SCREENED_ACTIONS } from './screen.ts';
+import { banner, screen, SCREENED_ACTIONS, type ScreenCache } from './screen.ts';
 import { renderCall, renderResult } from './render.ts';
 import { brand, completer } from '@prjct.app/pi-tui-kit';
 import type { AuthLinks, LoginResult } from './login.ts';
@@ -61,6 +61,8 @@ export function installMcp(pi: ExtensionAPI, options: {
 } = {}): void {
   const slot: { current: Session } = { current: { closed: false } };
   const jevSlot: { current?: Promise<Jev | undefined> } = {};
+  /** Bytes already judged in this session are never judged twice; see screen.ts. */
+  const screenedBefore: ScreenCache = new Map();
   const get = () => slot.current;
   const set = (update: Partial<Session>) => { slot.current = { ...get(), ...update }; };
   const output = new Output();
@@ -204,7 +206,7 @@ export function installMcp(pi: ExtensionAPI, options: {
     const text = rendered.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
     if (!text.trim()) return rendered;
     jevSlot.current ??= (options.jev ?? connectJev)();
-    const verdict = await screen(await jevSlot.current, text, signal);
+    const verdict = await screen(await jevSlot.current, text, signal, screenedBefore);
     if (!verdict?.flagged) return rendered;
     return {
       ...rendered,
