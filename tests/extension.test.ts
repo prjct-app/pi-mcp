@@ -5,6 +5,9 @@ import { mkdtemp, mkdir, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+// The real loader runs the real extension: keep the developer's TypeSafe key out of it.
+process.env.PI_MCP_OFFLINE = '1';
+
 test('Pi public loader loads the package; ten tool calls return inline without launching browser commands', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-extension-'));
   const oldAgentDir = process.env.PI_CODING_AGENT_DIR;

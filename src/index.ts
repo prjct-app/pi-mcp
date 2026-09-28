@@ -5,6 +5,8 @@ import type { OAuthManager, SecretStore } from './auth.ts';
 import { loadConfig, type ServerConfig } from './config.ts';
 import type { McpRuntime } from './runtime.ts';
 import { AUTH_LINK_TYPE, publishAuthorizationLink, renderAuthorizationLink } from './auth-link.ts';
+import { connectJev, type ConnectJev, type Jev } from './jev.ts';
+import { banner, screen, SCREENED_ACTIONS } from './screen.ts';
 import { renderCall, renderResult } from './render.ts';
 import { brand, completer } from '@prjct.app/pi-tui-kit';
 import type { AuthLinks, LoginResult } from './login.ts';
@@ -54,8 +56,11 @@ export function formatToolNotice(name: string, tools: readonly { name?: unknown 
 
 export function installMcp(pi: ExtensionAPI, options: {
   agentDir?: string; sharedConfigPath?: string; secretStore?: SecretStore; fetchFn?: typeof fetch; authTimeoutMs?: number;
+  /** Injected by the tests; the real one reads the shared TypeSafe key on the first screened result. */
+  jev?: ConnectJev;
 } = {}): void {
   const slot: { current: Session } = { current: { closed: false } };
+  const jevSlot: { current?: Promise<Jev | undefined> } = {};
   const get = () => slot.current;
   const set = (update: Partial<Session>) => { slot.current = { ...get(), ...update }; };
   const output = new Output();
@@ -185,9 +190,28 @@ export function installMcp(pi: ExtensionAPI, options: {
       if ((result as { isError?: boolean } | null)?.isError) {
         throw new Error(rendered.content.filter(block => block.type === 'text').map(block => block.text).join('\n'));
       }
-      return rendered;
+      return screened(params.action, params.server, result, rendered, signal);
     },
   });
+
+  /**
+   * Server-authored text gets one Jev look before the model reads it. A flagged
+   * result still arrives whole, under a banner; nothing is blocked. No key, a
+   * timeout or an error returns the result exactly as it was.
+   */
+  async function screened<T extends Awaited<ReturnType<Output['result']>>>(action: string, server: string, result: unknown, rendered: T, signal?: AbortSignal): Promise<T> {
+    if (!SCREENED_ACTIONS.has(action) || typeof (result as { status?: unknown } | null)?.status === 'string') return rendered;
+    const text = rendered.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
+    if (!text.trim()) return rendered;
+    jevSlot.current ??= (options.jev ?? connectJev)();
+    const verdict = await screen(await jevSlot.current, text, signal);
+    if (!verdict?.flagged) return rendered;
+    return {
+      ...rendered,
+      content: [{ type: 'text' as const, text: banner(server, verdict.p) }, ...rendered.content],
+      details: { ...rendered.details, screened: verdict },
+    };
+  }
 
   const interactiveOAuth = (config?: ServerConfig) => config?.auth === 'oauth' && config.oauth?.grantType !== 'client_credentials';
 

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Screen `call`, `read` and `prompt` results with Jev when a TypeSafe key is found: text that instructs the agent (p ≥ 0.7) arrives whole under a banner that marks it as third-party data, and the transcript row says so. Nothing is blocked; no key, a timeout or an error leaves the result unchanged. Adapted from Level 6 of disler/ten-levels-of-jev (MIT).
 - Document Supabase and Mobbin remote MCP servers (OAuth) in the README examples.
 - Add an interactive `/mcp` manager and `connect`, `disconnect`, and `logout` subcommands: per-server connection and credential state, re-authentication, cancelling a pending link, session-scoped disconnect, and OAuth sign-out.
 - Add `npm run build:pi`: a compiled local build in `~/.pi/agent/builds/<package>` that Pi loads instead of the TypeScript sources.

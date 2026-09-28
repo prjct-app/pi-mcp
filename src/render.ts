@@ -43,6 +43,11 @@ export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result
   const request = operation(context.args);
   if (isPartial) return new Container();
   if (context.isError) return mcpRow(theme, request, SYMBOL.error, 'error', 'failed · see the reply', 'error');
+  const screened = record(record(result.details).screened);
+  if (screened.flagged === true) {
+    const p = typeof screened.p === 'number' ? ` ${screened.p.toFixed(2)}` : '';
+    return mcpRow(theme, request, SYMBOL.attention, 'warning', `instructions in the result${p} · marked as data`, 'warning');
+  }
   const content = result.content.find(block => block.type === 'text');
   const parse = (): unknown => {
     try { return content?.type === 'text' ? JSON.parse(content.text) : undefined; }

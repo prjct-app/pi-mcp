@@ -167,6 +167,7 @@ When credentials are missing, the tool returns `authorization_required` and plac
 - Connections are lazy and resident until reset or session teardown.
 - No automatic replay of failures, polling loop, or idle reconnect.
 - Server descriptions/results are untrusted data (not user consent).
+- With a TypeSafe key (`TYPESAFE_API_KEY`, or the OS keyring entry pi-qa and pi-memory share), the text of `call`, `read` and `prompt` results gets one [Jev](https://typesafe.ai) look (the first 6,000 characters, about 300 ms): does it instruct the agent instead of informing it? Above 0.7 the result still arrives whole, under a banner that marks it as third-party data. Nothing is blocked or rewritten. Discovery and status are not screened; no key, a 3-second timeout or any error returns the result as it was.
 - A configured stdio executable can spawn programs itself.
 
 ---
