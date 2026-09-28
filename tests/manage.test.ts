@@ -76,14 +76,17 @@ function approve(link: string) {
   callback.searchParams.set('code', 'fixture-code');
   return fetch(callback);
 }
-const linkIn = (notice: string) => notice.match(/https:\/\/\S+/)![0];
+const linkIn = (host: { messages: { message: { customType?: string; content?: string } }[] }) => {
+  const message = [...host.messages].reverse().find(entry => entry.message.customType === 'mcp-auth-link');
+  return String(message?.message.content).match(/https:\/\/\S+/)![0];
+};
 
 test('the manager shows OAuth state, re-authenticates, and signs out after confirmation', async () => {
   const test = await oauthSetup(script([/remote · .*signed out/, /^Authenticate$/, /remote · .*signed in/, /^Sign out/, /Back/, /Close/]));
   try {
     await test.host.command('');
-    assert.match(test.host.notices.at(-1)!, /Click to authorize remote/);
-    assert.equal((await approve(linkIn(test.host.notices.at(-1)!))).status, 200);
+    assert.match(test.host.notices.at(-1)!, /Authorization link for remote is in the conversation/);
+    assert.equal((await approve(linkIn(test.host))).status, 200);
     await delay(20);
     assert.equal(test.store.data.size, 1);
     await test.host.command('status');
@@ -103,7 +106,7 @@ test('declining the sign-out confirmation keeps credentials', async () => {
   const test = await oauthSetup(script(steps), () => false);
   try {
     await test.host.command('auth remote');
-    assert.equal((await approve(linkIn(test.host.notices.at(-1)!))).status, 200);
+    assert.equal((await approve(linkIn(test.host))).status, 200);
     await delay(20);
     const before = test.host.notices.length;
     steps.push(/remote/, /^Sign out/, /Back/, /Close/);
@@ -117,12 +120,14 @@ test('a pending authorization can be cancelled quietly from the manager', async 
   const test = await oauthSetup(script([/remote · .*waiting for approval/, /^Cancel pending/, /Back/, /Close/]));
   try {
     await test.host.command('auth remote');
-    const link = linkIn(test.host.notices.at(-1)!);
+    const link = linkIn(test.host);
+    const before = test.host.messages.length;
     await test.host.command('');
     assert.match(test.host.notices.at(-1)!, /Pending authorization for remote cancelled/);
     await assert.rejects(approve(link));
     await delay(20);
-    assert.deepEqual(test.host.messages, []);
+    assert.equal(test.host.messages.length, before);
+    assert.equal(test.host.messages.filter(entry => entry.options?.triggerTurn).length, 0);
     await test.host.command('status');
     assert.match(test.host.notices.at(-1)!, /oauth: signed out/);
   } finally { await test.close(); }
