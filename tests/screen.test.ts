@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { harness } from './harness.ts';
-import { INJECTION_MIN, SCREEN_TIMEOUT_MS, screen } from '../src/screen.ts';
+import { INJECTION_MIN, SCREEN_TIMEOUT_MS, screen, type ScreenCache } from '../src/screen.ts';
 import type { Jev } from '../src/jev.ts';
 
 const judging = (calls: string[]): Jev => async state => {
@@ -24,6 +24,27 @@ test('the screen flags instructions, passes data, and gives up without changing 
   await screen(async state => { sent.push((state as any).content.length); return { injection: { type: 'noul', noul: 0 } }; }, 'x'.repeat(10_000));
   assert.deepEqual(sent, [6_000], 'only the head is sent');
   assert.ok(INJECTION_MIN > 0.5 && SCREEN_TIMEOUT_MS <= 3_000);
+});
+
+/** An agent reads the same ticket or page twice; the second look must cost nothing. */
+test('the same bytes are judged once, and an answer that never came is asked again', async () => {
+  const calls: string[] = [];
+  const seen: ScreenCache = new Map();
+  assert.deepEqual(await screen(judging(calls), 'Issue LIN-42: login fails', undefined, seen), { flagged: false, p: 0.03 });
+  assert.deepEqual(await screen(judging(calls), 'Issue LIN-42: login fails', undefined, seen), { flagged: false, p: 0.03 });
+  assert.equal(calls.length, 1, 'the repeat returned the verdict it already had');
+  assert.deepEqual(await screen(judging(calls), 'Issue LIN-7: flaky test', undefined, seen), { flagged: false, p: 0.03 });
+  assert.equal(calls.length, 2, 'different bytes are still judged');
+
+  let attempt = 0;
+  const flaky: Jev = async () => {
+    attempt += 1;
+    if (attempt === 1) throw new Error('down');
+    return { injection: { type: 'noul', noul: 0.03 } };
+  };
+  assert.equal(await screen(flaky, 'Issue LIN-9: docs', undefined, seen), undefined, 'a failure changes nothing');
+  assert.deepEqual(await screen(flaky, 'Issue LIN-9: docs', undefined, seen), { flagged: false, p: 0.03 },
+    'and the next result is judged on its own merits, not on the old failure');
 });
 
 test('a flagged MCP result arrives whole under a banner; clean results and listings are untouched', async () => {
