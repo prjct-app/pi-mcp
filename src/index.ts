@@ -4,6 +4,7 @@ import { Type } from 'typebox';
 import type { OAuthManager, SecretStore } from './auth.ts';
 import { loadConfig, type ServerConfig } from './config.ts';
 import type { McpRuntime } from './runtime.ts';
+import { AUTH_LINK_TYPE, publishAuthorizationLink, renderAuthorizationLink } from './auth-link.ts';
 import { renderCall, renderResult } from './render.ts';
 import { brand, completer } from '@prjct.app/pi-tui-kit';
 import type { AuthLinks, LoginResult } from './login.ts';
@@ -37,11 +38,8 @@ function diagnostic(error: unknown): string {
   return `MCP operation failed${typeof code === 'number' || typeof code === 'string' ? ` (${plain(String(code)).slice(0, 80)})` : ''}. Check configuration/authentication; use /mcp reconnect <server> to reset a failed connection. No operation was automatically replayed by pi-mcp.`;
 }
 
-function loginNotice(name: string, result: LoginResult): string {
-  if (result.status === 'authorization_required' && result.authorizationUrl) {
-    return `Click to authorize ${plain(name)}:\n${result.authorizationUrl}\nPi detects approval automatically. No callback needs to be pasted.`;
-  }
-  return plain(result.message).slice(0, 1000);
+function loginNotice(name: string): string {
+  return `Authorization link for ${plain(name)} is in the conversation.`;
 }
 
 /** @internal Pure formatting keeps untrusted slash-command lists bounded and testable. */
@@ -118,6 +116,8 @@ export function installMcp(pi: ExtensionAPI, options: {
     }
   }
 
+  const publishedLinks = new Set<string>();
+  pi.registerMessageRenderer(AUTH_LINK_TYPE, renderAuthorizationLink);
   pi.registerTool({
     name: 'mcp', label: 'MCP', renderShell: 'self', renderCall, renderResult,
     description: 'Use configured MCP servers: status, tools/call, resources/templates/read, prompts/prompt, and argument completion. Supports user OAuth links and non-interactive machine OAuth. No browser launches or HTML execution. Output is capped at 50 KiB / 2000 lines with private overflow files.',
@@ -180,6 +180,7 @@ export function installMcp(pi: ExtensionAPI, options: {
         }
       };
       const result = await active.modules.runtime.abortable(run(active, params.server, ctx, operation, signal), signal).catch(error => { throw new Error(diagnostic(error)); });
+      publishAuthorizationLink(pi, params.server, result, publishedLinks);
       const rendered = await output.result(result);
       if ((result as { isError?: boolean } | null)?.isError) {
         throw new Error(rendered.content.filter(block => block.type === 'text').map(block => block.text).join('\n'));
@@ -205,7 +206,8 @@ export function installMcp(pi: ExtensionAPI, options: {
   }
 
   function linkOutcome(name: string, login: LoginResult): Outcome {
-    return { message: loginNotice(name, login), level: login.status === 'authorization_failed' ? 'warning' : 'info', leave: true };
+    publishAuthorizationLink(pi, name, login, publishedLinks);
+    return { message: login.status === 'authorization_required' ? loginNotice(name) : plain(login.message).slice(0, 1000), level: login.status === 'authorization_failed' ? 'warning' : 'info', leave: true };
   }
 
   async function perform(active: Services, ctx: ExtensionContext, name: string, action: Action): Promise<Outcome> {
