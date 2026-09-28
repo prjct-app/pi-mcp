@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import type { Theme, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { harness } from './harness.ts';
 import { formatToolNotice } from '../src/index.ts';
+import { renderAuthorizationLink } from '../src/auth-link.ts';
 
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme;
 type RenderContext = Parameters<NonNullable<ToolDefinition['renderResult']>>[3];
@@ -16,6 +17,15 @@ function display(tool: ToolDefinition, result: any, args: Record<string, unknown
     ? tool.renderResult(result, { expanded, isPartial: false }, theme, context).render(100).join('\n')
     : result.content.filter((block: any) => block.type === 'text').map((block: any) => block.text).join('\n');
 }
+
+test('authorization links render as clickable OSC 8 hyperlinks in the conversation', () => {
+  const rendered = renderAuthorizationLink({
+    content: 'Authorize posthog',
+    details: { server: 'posthog', authorizationUrl: 'https://auth.example/authorize?state=1' },
+  }, {}, { ...theme, underline: (text: string) => text, bg: (_color: string, text: string) => text } as Theme).render(120).join('\n');
+  assert.match(rendered, /\x1b]8;;https:\/\/auth\.example\/authorize\?state=1/);
+  assert.match(rendered, /Authorize posthog/);
+});
 
 test('discovery schemas remain available to the model but never appear in collapsed or expanded tool rows', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-render-'));

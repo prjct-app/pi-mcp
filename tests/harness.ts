@@ -21,6 +21,7 @@ export function harness(root: string, options: { mode?: 'tui' | 'rpc' | 'print' 
   } as unknown as ExtensionContext;
   const pi = {
     sendMessage: (message: unknown, options: unknown) => messages.push({ message, options }),
+    registerMessageRenderer: () => undefined,
     on: (name: string, handler: Handler) => handlers.set(name, [...handlers.get(name) ?? [], handler]),
     registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
     registerCommand: (name: string, command: unknown) => commands.set(name, command),

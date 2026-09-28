@@ -141,7 +141,7 @@ mcp({ action: "prompt", server: "local", prompt: "name", args: {} })
 mcp({ action: "complete", server: "local", uri: "example://docs/{topic}", argument: "topic", value: "auth" })
 ```
 
-When credentials are missing, the tool returns `authorization_required` with an `authorizationUrl`. Show the link once and wait for the `mcp-auth` message; do not poll or ask for callbacks. MCP tool errors become Pi errors.
+When credentials are missing, the tool returns `authorization_required` and places one clickable authorization link in the conversation. Do not open it, poll, or ask for callbacks. Wait for the `mcp-auth` message. MCP tool errors become Pi errors.
 
 ---
 

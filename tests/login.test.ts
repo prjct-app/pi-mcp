@@ -49,14 +49,15 @@ test('ten unauthenticated Pi requests return one link; a browser callback saves 
     assert.ok(links.every(link => link.status === 'authorization_required'));
     assert.equal(new Set(links.map(link => link.authorizationUrl)).size, 1);
     assert.equal(test.fixture.requests.filter(url => url.endsWith('/register')).length, 1);
-    assert.equal(test.host.messages.length, 0);
+    assert.equal(test.host.messages.filter(entry => entry.message.customType === 'mcp-auth-link').length, 1);
+    assert.equal(test.host.messages.filter(entry => entry.options?.triggerTurn).length, 0);
     const response = await fetch(callback(links[0].authorizationUrl));
     assert.equal(response.status, 200);
     assert.match(await response.text(), /return to Pi/i);
     await delay(20);
-    assert.equal(test.host.messages.length, 1);
-    assert.equal(test.host.messages[0]?.options.triggerTurn, true);
-    assert.match(test.host.messages[0]?.message.content, /authorized/);
+    const completion = test.host.messages.find(entry => entry.options?.triggerTurn);
+    assert.equal(completion?.options.triggerTurn, true);
+    assert.match(completion?.message.content, /authorized/);
     assert.doesNotMatch(JSON.stringify(test.host.messages), /fixture-token|fixture-refresh|fixture-code|code_verifier/);
     const next = new OAuthManager(test.servers, test.store, test.fixture.fetchFn);
     try { assert.equal(await next.provider('remote').token(), 'refreshed-fixture-token'); }
@@ -85,9 +86,11 @@ test('slash-command tool discovery formats OAuth as a concise instruction instea
   try {
     await test.host.command('tools remote');
     const notice = test.host.notices.at(-1)!;
-    assert.match(notice, /Click to authorize remote/);
-    assert.match(notice, /https:\/\//);
-    assert.doesNotMatch(notice, /authorization_required|authorizationUrl|[{}]/);
+    const link = test.host.messages.find(entry => entry.message.customType === 'mcp-auth-link');
+    assert.match(notice, /Authorization link for remote is in the conversation/);
+    assert.doesNotMatch(notice, /https:\/\//);
+    assert.match(link?.message.content ?? '', /https:\/\//);
+    assert.equal(link?.options.triggerTurn, false);
   } finally { await test.close(); }
 });
 
@@ -100,11 +103,11 @@ test('wrong state and duplicate state cannot consume an outstanding authorizatio
     const duplicate = callback(result.authorizationUrl);
     duplicate.searchParams.append('state', duplicate.searchParams.get('state')!);
     assert.equal((await fetch(duplicate)).status, 400);
-    assert.equal(test.host.messages.length, 0);
+    assert.equal(test.host.messages.filter(entry => entry.options?.triggerTurn).length, 0);
     assert.ok(!test.fixture.requests.some(url => url.endsWith('/token')));
     assert.equal((await fetch(callback(result.authorizationUrl))).status, 200);
     await delay(20);
-    assert.equal(test.host.messages.length, 1);
+    assert.equal(test.host.messages.filter(entry => entry.options?.triggerTurn).length, 1);
   } finally { await test.close(); }
 });
 
@@ -117,12 +120,13 @@ test('expired links do not create an authorization storm; an explicit retry crea
     const retries = await Promise.all(Array.from({ length: 10 }, () => test.host.tool({ action: 'tools', server: 'remote' })));
     assert.ok(retries.every(result => body(result).status === 'authorization_failed'));
     assert.equal(test.fixture.requests.length, before);
-    assert.equal(test.host.messages.length, 1);
-    assert.equal(test.host.messages[0]?.options.triggerTurn, false);
+    const expiry = test.host.messages.find(entry => entry.message.customType === 'mcp-auth');
+    assert.equal(expiry?.options.triggerTurn, false);
     await assert.rejects(fetch(callback(result.authorizationUrl)));
     await test.host.command('auth remote');
-    assert.match(test.host.notices.at(-1)!, /Click to authorize/);
+    assert.match(test.host.notices.at(-1)!, /Authorization link for remote is in the conversation/);
     assert.ok(!test.host.notices.at(-1)!.includes(result.authorizationUrl));
+    assert.ok(test.host.messages.some(entry => entry.message.customType === 'mcp-auth-link' && !String(entry.message.content).includes(result.authorizationUrl)));
   } finally { await test.close(); }
 });
 
@@ -143,7 +147,7 @@ test('switching Pi sessions cancels pending callbacks without waking the replace
     const result = body(await test.host.tool({ action: 'tools', server: 'remote' }));
     await test.host.emit('session_start');
     await assert.rejects(fetch(callback(result.authorizationUrl)));
-    assert.deepEqual(test.host.messages, []);
+    assert.equal(test.host.messages.filter(entry => entry.options?.triggerTurn).length, 0);
     const replacement = body(await test.host.tool({ action: 'tools', server: 'remote' }));
     assert.notEqual(replacement.authorizationUrl, result.authorizationUrl);
     assert.equal((await fetch(callback(replacement.authorizationUrl))).status, 200);
@@ -160,6 +164,6 @@ test("two configured servers can share the callback port without consuming each 
     assert.equal((await fetch(callback(body(results[0]).authorizationUrl))).status, 200);
     assert.equal((await fetch(callback(body(results[1]).authorizationUrl))).status, 200);
     await delay(20);
-    assert.equal(test.host.messages.length, 2);
+    assert.equal(test.host.messages.filter(entry => entry.options?.triggerTurn).length, 2);
   } finally { await test.close(); }
 });
