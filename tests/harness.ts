@@ -26,7 +26,8 @@ export function harness(root: string, options: { mode?: 'tui' | 'rpc' | 'print' 
     registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
     registerCommand: (name: string, command: unknown) => commands.set(name, command),
   } as unknown as ExtensionAPI;
-  installMcp(pi, { agentDir: root, sharedConfigPath: `${root}/missing-shared-config.json`, ...options.dependencies });
+  // No test reaches the keyring or the network for Jev unless it brings one.
+  installMcp(pi, { agentDir: root, sharedConfigPath: `${root}/missing-shared-config.json`, jev: async () => undefined, ...options.dependencies });
   return {
     tools, commands, notices, messages, dialogs,
     async emit(name: string) { for (const handler of handlers.get(name) ?? []) await handler({}, context); },
