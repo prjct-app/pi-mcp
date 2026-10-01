@@ -36,3 +36,17 @@ test('images stay native Pi blocks while text cannot inject terminal control seq
     assert.match(first.text, /"answer":42/);
   } finally { await output.close(); }
 });
+
+test('JSON results reach the model compact, without nulls, and never twice', async () => {
+  const { compactJson } = await import('../src/output.ts');
+  assert.equal(compactJson('{\n  "a": 1,\n  "b": null,\n  "c": { "d": null, "e": [1, null] }\n}'), '{"a":1,"c":{"e":[1,null]}}');
+  assert.equal(compactJson('plain text'), 'plain text');
+  const output = new Output();
+  try {
+    const data = { key: 'PRJ-1', assignee: null, fields: { summary: 'Login' } };
+    const result = await output.result({ content: [{ type: 'text', text: JSON.stringify(data, null, 2) }], structuredContent: data });
+    const first = result.content[0];
+    assert.ok(first?.type === 'text');
+    assert.equal(first.text, '{"key":"PRJ-1","fields":{"summary":"Login"}}', 'the text copy of structuredContent is enough');
+  } finally { await output.close(); }
+});

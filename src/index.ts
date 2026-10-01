@@ -1,3 +1,4 @@
+import { repairToolArgs } from '@prjct.app/pi-tui-kit';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { AUTH_LINK_TYPE, renderAuthorizationLink } from './auth-link.ts';
 import { installCommand } from './commands.ts';
@@ -7,6 +8,7 @@ import type { McpOptions } from './services.ts';
 export { formatToolNotice } from './commands.ts';
 
 export function installMcp(pi: ExtensionAPI, options: McpOptions = {}): void {
+  repairToolArgs(pi);
   const operations = new Operations(pi, options);
   pi.registerMessageRenderer(AUTH_LINK_TYPE, renderAuthorizationLink);
   pi.registerTool({

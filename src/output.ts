@@ -26,6 +26,26 @@ function boundedText(text: string) {
   return { text: `${truncateHead(first, options).content}\n[… middle omitted …]\n${truncateTail(last, options).content}`, truncated: true };
 }
 
+const dropNulls = (value: unknown): unknown =>
+  Array.isArray(value) ? value.map(dropNulls)
+    : record(value) ? Object.fromEntries(Object.entries(value).filter(([, item]) => item !== null && item !== undefined).map(([key, item]) => [key, dropNulls(item)]))
+      : value;
+
+/**
+ * JSON text as the model reads it best for its size: no indentation and no
+ * null fields (Jira alone sends dozens of null custom fields per issue).
+ * Anything that is not a JSON object or array is returned as it came.
+ */
+export function compactJson(text: string): string {
+  const trimmed = text.trim();
+  if (!/^[[{]/u.test(trimmed)) return text;
+  try {
+    return JSON.stringify(dropNulls(JSON.parse(trimmed)));
+  } catch {
+    return text;
+  }
+}
+
 /** Session-scoped private text and binary files. Links are described, never fetched. */
 export class Output {
   private readonly directories = new Set<Promise<string>>();
@@ -38,7 +58,7 @@ export class Output {
     const blocks = Array.isArray(payload.content) ? payload.content : Array.isArray(payload.contents) ? payload.contents : undefined;
     const parts = blocks ? await Promise.all(blocks.map(async (block: unknown) => {
       if (!record(block)) return JSON.stringify(block);
-      if (typeof block.text === 'string') return block.text;
+      if (typeof block.text === 'string') return compactJson(block.text);
       if (block.type === 'resource_link') return `[Resource link: ${String(block.name ?? 'resource')} · ${String(block.uri ?? '')}${typeof block.mimeType === 'string' ? ` · ${block.mimeType}` : ''}. Use MCP read explicitly; not fetched.]`;
       if (block.type === 'resource' && record(block.resource)) return this.resource(block.resource);
       if (typeof block.blob === 'string') return this.resource(block);
@@ -53,7 +73,12 @@ export class Output {
       return JSON.stringify(block);
     })) : [JSON.stringify(value, null, 2) ?? 'null'];
     const structured = payload.structuredContent === undefined ? '' : JSON.stringify(payload.structuredContent) ?? '';
-    const clean = plain(parts.join('\n') + (structured ? `\n${structured}` : ''));
+    // Servers send structuredContent with a text copy of it for older clients;
+    // appending both doubled every result. It is added only when the text does
+    // not already carry it.
+    const text = parts.join('\n');
+    const data = structured ? compactJson(structured) : '';
+    const clean = plain(data && !text.includes(data) ? (text ? `${text}\n${data}` : data) : text);
     const bounded = boundedText(clean);
     const path = bounded.truncated ? await this.spill(clean, 'txt') : undefined;
     const suffix = !bounded.truncated ? '' : path
