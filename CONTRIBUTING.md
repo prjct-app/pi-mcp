@@ -5,7 +5,7 @@
 - Only grouped `develop` → `main` promotions may target `main` (merge commits).
 - Use `.github/pull_request_template.md`.
 - Use English for code, docs, tests, issues, and PRs.
-- Strict TypeScript. Public Pi 0.85.1 and MCP SDK 2.0 APIs only.
+- Strict TypeScript. Public Pi 0.99.1 and MCP SDK 2.0 APIs only.
 - Follow pi-team: minimal root entry, injectable `installMcp`, immutable snapshots, isolated tests.
 - `npm run check:immutable` rejects `let` in `src/`. Never capture mutable state across an await.
 - README is operational. Design and compatibility go in `docs/`.

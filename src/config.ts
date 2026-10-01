@@ -64,9 +64,16 @@ export function parseServers(raw: unknown, baseDir: string, env: NodeJS.ProcessE
   }));
 }
 
-export async function loadConfig(options: {
+export type ConfigOptions = {
   cwd: string; agentDir: string; configDirName: string; trusted: boolean; sharedConfigPath?: string;
-}): Promise<Record<string, ServerConfig>> {
+};
+export type Configuration = Readonly<{ servers: Record<string, ServerConfig>; sources: Record<string, string> }>;
+
+export async function loadConfig(options: ConfigOptions): Promise<Record<string, ServerConfig>> {
+  return (await loadConfiguration(options)).servers;
+}
+
+export async function loadConfiguration(options: ConfigOptions): Promise<Configuration> {
   const paths = [options.sharedConfigPath ?? join(process.env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'mcp', 'mcp.json'), join(options.agentDir, 'mcp.json')];
   if (options.trusted) paths.push(join(options.cwd, '.mcp.json'), join(options.cwd, options.configDirName, 'mcp.json'));
   const result = await paths.reduce(async (previous, path) => {
@@ -75,9 +82,13 @@ export async function loadConfig(options: {
     if (raw === undefined) return servers;
     const document = z.object({ mcpServers: z.record(z.string(), z.unknown()).default({}), imports: z.array(z.unknown()).max(0).optional() }).passthrough().safeParse(raw);
     if (!document.success) throw new Error('Invalid MCP configuration; host imports are not supported');
-    return { ...servers, ...parseServers(document.data.mcpServers, dirname(path)) };
-  }, Promise.resolve({} as Record<string, ServerConfig>));
-  if (Object.keys(result).length > 64) throw new Error('At most 64 MCP servers are supported');
+    const parsed = parseServers(document.data.mcpServers, dirname(path));
+    return {
+      servers: { ...servers.servers, ...parsed },
+      sources: { ...servers.sources, ...Object.fromEntries(Object.keys(parsed).map(name => [name, path])) },
+    };
+  }, Promise.resolve<Configuration>({ servers: {}, sources: {} }));
+  if (Object.keys(result.servers).length > 64) throw new Error('At most 64 MCP servers are supported');
   return result;
 }
 

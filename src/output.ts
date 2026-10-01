@@ -3,55 +3,100 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { stripVTControlCharacters } from 'node:util';
-import { truncateHead } from '@earendil-works/pi-coding-agent';
+import { truncateHead, truncateTail } from '@earendil-works/pi-coding-agent';
 import type { ImageContent, TextContent } from '@earendil-works/pi-ai';
+import { record, json } from './data.ts';
 
 export function plain(text: string): string {
   return stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
 }
 
-/** Session-scoped private overflow files. No HTML rendering or browser integration. */
+/** Keep context and conclusions, without slicing UTF-8 characters or exceeding either budget. */
+function boundedText(text: string) {
+  const head = truncateHead(text, { maxBytes: 50 * 1024, maxLines: 2000 });
+  if (!head.truncated) return { text, truncated: false };
+  const options = { maxBytes: 24 * 1024, maxLines: 998 };
+  const bytes = Buffer.from(text);
+  const boundary = (index: number, direction: -1 | 1): number => {
+    const byte = bytes[index];
+    return byte !== undefined && (byte & 0xc0) === 0x80 ? boundary(index + direction, direction) : index;
+  };
+  const first = bytes.subarray(0, boundary(Math.min(bytes.length, options.maxBytes), -1)).toString('utf8');
+  const last = bytes.subarray(boundary(Math.max(0, bytes.length - options.maxBytes), 1)).toString('utf8');
+  return { text: `${truncateHead(first, options).content}\n[… middle omitted …]\n${truncateTail(last, options).content}`, truncated: true };
+}
+
+/** Session-scoped private text and binary files. Links are described, never fetched. */
 export class Output {
   private readonly directories = new Set<Promise<string>>();
   private readonly slot = { closed: false, bytes: 0 };
 
   async result(value: unknown) {
     if (this.slot.closed) throw new Error('MCP output is closed');
-    const payload = value as { content?: unknown; structuredContent?: unknown } | null;
-    const blocks = Array.isArray(payload?.content) ? payload.content as { type?: string; text?: string; data?: string; mimeType?: string }[] : undefined;
+    const payload = record(value) ? value : {};
     const images: ImageContent[] = [];
-    const text = blocks ? blocks.map(block => {
-      if (block.type === 'text' && typeof block.text === 'string') return block.text;
-      if (block.type === 'image' && typeof block.data === 'string' && ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(block.mimeType ?? '')) {
+    const blocks = Array.isArray(payload.content) ? payload.content : Array.isArray(payload.contents) ? payload.contents : undefined;
+    const parts = blocks ? await Promise.all(blocks.map(async (block: unknown) => {
+      if (!record(block)) return JSON.stringify(block);
+      if (typeof block.text === 'string') return block.text;
+      if (block.type === 'resource_link') return `[Resource link: ${String(block.name ?? 'resource')} · ${String(block.uri ?? '')}${typeof block.mimeType === 'string' ? ` · ${block.mimeType}` : ''}. Use MCP read explicitly; not fetched.]`;
+      if (block.type === 'resource' && record(block.resource)) return this.resource(block.resource);
+      if (typeof block.blob === 'string') return this.resource(block);
+      if (block.type === 'image' && typeof block.data === 'string' && typeof block.mimeType === 'string' && ['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(block.mimeType)) {
         if (block.data.length <= 2 * 1024 * 1024 && images.length < 4) {
-          images.push({ type: 'image', data: block.data, mimeType: block.mimeType! });
+          images.push({ type: 'image', data: block.data, mimeType: block.mimeType });
           return '';
         }
         return '[Image omitted: limit is four images, each at most 2 MiB base64.]';
       }
+      if ((block.type === 'audio' || block.type === 'image') && typeof block.data === 'string') return this.resource({ ...block, blob: block.data });
       return JSON.stringify(block);
-    }).join('\n') + (payload?.structuredContent !== undefined ? `\n${JSON.stringify(payload.structuredContent)}` : '') : JSON.stringify(value, null, 2) ?? 'null';
-    const clean = plain(text);
-    const bounded = truncateHead(clean, { maxBytes: 50 * 1024, maxLines: 2000 });
-    const suffix = bounded.truncated ? await this.spill(clean) : '';
+    })) : [JSON.stringify(value, null, 2) ?? 'null'];
+    const structured = payload.structuredContent === undefined ? '' : JSON.stringify(payload.structuredContent) ?? '';
+    const clean = plain(parts.join('\n') + (structured ? `\n${structured}` : ''));
+    const bounded = boundedText(clean);
+    const path = bounded.truncated ? await this.spill(clean, 'txt') : undefined;
+    const suffix = !bounded.truncated ? '' : path
+      ? `\n[Truncated to 50 KiB / 2000 lines. Full text: ${path}. Removed at session shutdown.]`
+      : '\n[Truncated; the 50 MiB session overflow-file budget is exhausted.]';
+    const content: (TextContent | ImageContent)[] = [{ type: 'text', text: bounded.text + suffix }, ...images];
     return {
-      content: [{ type: 'text', text: bounded.content + suffix } as TextContent, ...images],
-      details: { truncated: bounded.truncated },
+      content, details: { truncated: bounded.truncated },
+      structuredContent: {
+        content: content.map(block => ({ ...block })),
+        ...(payload.structuredContent !== undefined && json(payload.structuredContent) && Buffer.byteLength(structured) <= 50 * 1024 ? { structuredContent: payload.structuredContent } : {}),
+        ...(typeof payload.isError === 'boolean' ? { isError: payload.isError } : {}),
+      },
+      ...(typeof payload.isError === 'boolean' ? { isError: payload.isError } : {}),
     };
   }
 
-  private async spill(text: string) {
-    const bytes = Buffer.byteLength(text);
-    if (this.slot.bytes + bytes > 50 * 1024 * 1024) return '\n[Truncated; the 50 MiB session overflow-file budget is exhausted.]';
+  private async resource(resource: Record<string, unknown>): Promise<string> {
+    const label = `${String(resource.uri ?? 'embedded resource')}${typeof resource.mimeType === 'string' ? ` · ${resource.mimeType}` : ''}`;
+    if (typeof resource.text === 'string') return `[Resource: ${label}]\n${resource.text}`;
+    if (typeof resource.blob !== 'string') return `[Resource: ${label}]`;
+    if (resource.blob.length > 14 * 1024 * 1024) return `[Binary resource: ${label}. Omitted: exceeds 10 MiB decoded limit.]`;
+    const encoded = resource.blob.replace(/\s/g, '');
+    const bytes = Buffer.from(encoded, 'base64');
+    if (bytes.toString('base64').replace(/=+$/, '') !== encoded.replace(/=+$/, '')) return `[Binary resource: ${label}. Omitted: invalid base64.]`;
+    if (bytes.length > 10 * 1024 * 1024) return `[Binary resource: ${label}. Omitted: exceeds 10 MiB decoded limit.]`;
+    const path = await this.spill(bytes, 'bin');
+    return path ? `[Binary resource: ${label} · ${bytes.length} bytes. File: ${path}. Removed at session shutdown.]`
+      : `[Binary resource: ${label}. Omitted: session file budget exhausted.]`;
+  }
+
+  private async spill(value: string | Buffer, extension: 'txt' | 'bin') {
+    const bytes = Buffer.byteLength(value);
+    if (this.slot.bytes + bytes > 50 * 1024 * 1024) return undefined;
     this.slot.bytes += bytes;
     const directory = mkdtemp(join(tmpdir(), 'pi-mcp-output-'));
     this.directories.add(directory);
     const dir = await directory;
     if (this.slot.closed) { await rm(dir, { recursive: true, force: true }); throw new Error('MCP output is closed'); }
-    const path = join(dir, `${randomUUID()}.txt`);
-    await writeFile(path, text, { mode: 0o600, flag: 'wx' });
+    const path = join(dir, `${randomUUID()}.${extension}`);
+    await writeFile(path, value, { mode: 0o600, flag: 'wx' });
     if (this.slot.closed) { await rm(dir, { recursive: true, force: true }); throw new Error('MCP output is closed'); }
-    return `\n[Truncated to 50 KiB / 2000 lines. Full text: ${path}. Removed at session shutdown.]`;
+    return path;
   }
 
   async close() {

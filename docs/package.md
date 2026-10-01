@@ -4,7 +4,7 @@
 
 - **Local name**: `@prjct.app/pi-mcp` · **Version**: `0.1.0` · **Private**: yes
 - **Repo**: [prjct-app/pi-mcp](https://github.com/prjct-app/pi-mcp) · **Integration branch**: `develop`
-- **Pi API**: `@earendil-works/pi-coding-agent@0.85.1` · **MCP SDK**: `@modelcontextprotocol/client@2.0.0`
+- **Pi API**: `@earendil-works/pi-coding-agent@0.99.1` · **MCP SDK**: `@modelcontextprotocol/client@2.0.0`
 - **Node**: ≥ 22.19 (verified macOS 22.22.2)
 - **Runtime dependencies**: MCP client, Zod, native keyring. No browsers or MCP Apps.
 
@@ -54,8 +54,8 @@ Tests never read production credentials, launch browsers, call models, or contac
 
 ## Official references
 
-- [Pi extensions, lifecycle, tools and mode guards (v0.85.1)](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/docs/extensions.md)
-- [Pi package manifest and peer dependency rules](https://github.com/earendil-works/pi/blob/v0.85.1/packages/coding-agent/docs/packages.md)
+- [Pi extensions, lifecycle, tools and mode guards (v0.99.1)](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/docs/extensions.md)
+- [Pi package manifest and peer dependency rules](https://github.com/earendil-works/pi/blob/v0.99.1/packages/coding-agent/docs/packages.md)
 - [SDK protocol eras](https://github.com/modelcontextprotocol/typescript-sdk/blob/5ecc791d81a7221ebe15ae3ae3f36a8e978af820/docs/protocol-versions.md)
 - [SDK client OAuth](https://github.com/modelcontextprotocol/typescript-sdk/blob/5ecc791d81a7221ebe15ae3ae3f36a8e978af820/docs/clients/oauth.md)
 - [SDK connection lifecycle](https://github.com/modelcontextprotocol/typescript-sdk/blob/5ecc791d81a7221ebe15ae3ae3f36a8e978af820/docs/clients/connect.md)
