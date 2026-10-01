@@ -12,8 +12,9 @@ export type ServerInfo = Readonly<{
   auth: 'oauth' | 'machine' | 'bearer' | 'none';
   credential?: Credential;
   env?: string;
+  exposure?: 'direct' | 'deferred' | 'codemode' | 'hidden';
 }>;
-export type Action = 'connect' | 'tools' | 'reconnect' | 'disconnect' | 'auth' | 'link' | 'cancel' | 'logout';
+export type Action = 'connect' | 'tools' | 'reconnect' | 'disconnect' | 'auth' | 'link' | 'cancel' | 'logout' | 'enable' | 'disable' | 'exposure';
 export type Outcome = Readonly<{ message: string; level: 'info' | 'warning' | 'error'; leave?: boolean; tools?: readonly string[] }>;
 export interface ServerControl {
   describe(): Promise<ServerInfo[]>;
@@ -31,6 +32,7 @@ const CREDENTIALS: Record<Credential, string> = {
 const LABELS: Record<Action, string> = {
   connect: 'Connect', tools: 'List tools', reconnect: 'Reconnect', disconnect: 'Disconnect for this session',
   auth: 'Authenticate', link: 'Show authorization link', cancel: 'Cancel pending authorization', logout: 'Sign out (forget credentials)',
+  enable: 'Enable server', disable: 'Disable server (persist)', exposure: 'Tool exposure',
 };
 
 /** @internal */
@@ -50,17 +52,18 @@ export function formatServerLine(info: ServerInfo): string {
 
 /** @internal Actions that make sense for the server's current connection and credential state. */
 export function actionsFor(info: ServerInfo): Action[] {
-  if (info.state === 'disabled') return [];
+  if (info.state === 'disabled') return ['enable'];
   const connection: Action[] = info.state === 'connected' ? ['tools', 'reconnect', 'disconnect']
     : info.state === 'failed' ? ['reconnect', 'disconnect']
     : info.state === 'disconnected' ? ['connect']
     : ['connect', 'disconnect'];
-  if (info.auth !== 'oauth') return connection;
+  const settings: Action[] = ['exposure', 'disable'];
+  if (info.auth !== 'oauth') return [...connection, ...settings];
   const credential: Action[] = info.credential === 'pending' ? ['link', 'cancel', 'logout']
     : info.credential === 'authorized' || info.credential === 'refreshable' ? ['auth', 'logout']
     : info.credential === 'signed_out' ? ['auth']
     : ['auth', 'logout'];
-  return [...connection, ...credential];
+  return [...connection, ...credential, ...settings];
 }
 
 export function actionLabel(action: Action, info: ServerInfo): string {
@@ -87,7 +90,7 @@ export function authMeta(info: ServerInfo): string {
 }
 
 type Trace = { at: number; text: string; level: Outcome['level'] };
-const KEYS: Record<Action, string> = { connect: 'c', tools: 't', reconnect: 'r', disconnect: 'd', auth: 'a', link: 'l', cancel: 'p', logout: 'x' };
+const KEYS: Record<Action, string> = { connect: 'c', tools: 't', reconnect: 'r', disconnect: 'd', auth: 'a', link: 'l', cancel: 'p', logout: 'x', enable: 'e', disable: 's', exposure: 'v' };
 
 /**
  * @internal The /mcp panel: servers on the left; state, credentials, endpoint,
@@ -108,7 +111,7 @@ export function serverPanel(control: ServerControl, initial: ServerInfo[], notif
       if (action === 'auth' && server) return actionLabel(action, server);
       return action === 'disconnect' ? 'Disconnect' : action === 'logout' ? 'Sign out' : action === 'cancel' ? 'Cancel pending' : action === 'link' ? 'Auth link' : LABELS[action];
     },
-    confirm: action === 'logout',
+    confirm: action === 'logout' || action === 'disable',
     when: item => { const server = info(item); return !!server && actionsFor(server).includes(action); },
     run: async (item, panel) => {
       const name = item!.id;
@@ -145,6 +148,7 @@ export function serverPanel(control: ServerControl, initial: ServerInfo[], notif
         fields: [
           { label: 'auth', value: describeAuth(server), tone: authMeta(server).endsWith(SYMBOL.error) ? 'warning' : undefined },
           { label: 'endpoint', value: plain(server.endpoint) },
+          { label: 'exposure', value: server.exposure ?? 'deferred' },
           ...(server.state === 'disabled' ? [{ label: 'note', value: 'Disabled in mcp.json.', tone: 'dim' as Tone }] : []),
         ],
         sections: [
@@ -191,6 +195,7 @@ async function manageServer(ctx: ExtensionContext, control: ServerControl, name:
   const picked = await ctx.ui.select(title, [...labels, BACK]);
   const action = picked === undefined ? undefined : actions[labels.indexOf(picked)];
   if (!action) return false;
+  if (action === 'disable' && !await ctx.ui.confirm(`Disable ${plain(name)}?`, 'Persist disabled state in its configuration and close this server connection?')) return manageServer(ctx, control, name);
   if (action === 'logout' && !await ctx.ui.confirm(`Sign out of ${plain(name)}?`, 'Removes the saved OAuth credentials for this server from the OS keyring. Tokens are not revoked at the provider. You can authenticate again at any time.')) {
     return manageServer(ctx, control, name);
   }

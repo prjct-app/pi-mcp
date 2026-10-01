@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { discoverAndLoadExtensions, type ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { harness } from './harness.ts';
 import { mkdtemp, mkdir, writeFile, rm, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -26,13 +26,11 @@ test('Pi public loader loads the package; ten tool calls return inline without l
     await writeFile(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { local: {
       command: process.execPath, args: ['--import', resolve('node_modules/tsx/dist/loader.mjs'), resolve('tests/fixtures/server.ts')],
     } } }));
-    const loaded = await discoverAndLoadExtensions([resolve('index.ts')], dir, dir);
-    assert.deepEqual(loaded.errors, []);
-    const extension = loaded.extensions[0]!;
-    const ctx = { cwd: dir, isProjectTrusted: () => false, mode: 'print', hasUI: false } as ExtensionContext;
-    stop = async () => { for (const handler of extension.handlers.get('session_shutdown') ?? []) await handler({ type: 'session_shutdown', reason: 'quit' }, ctx); };
-    for (const handler of extension.handlers.get('session_start') ?? []) await handler({ type: 'session_start', reason: 'startup' }, ctx);
-    const tool = extension.tools.get('mcp')!.definition;
+    const host = await harness(dir, { mode: 'print', realPackage: true });
+    stop = () => host.emit('session_shutdown');
+    await host.emit('session_start');
+    const tool = host.tools.get('mcp')!;
+    const ctx = host.runner.createToolContext('test-call', undefined);
     const status = await tool.execute('status', { action: 'status' }, undefined, undefined, ctx);
     assert.match(JSON.stringify(status.content), /idle/);
     const results = await Promise.all(Array.from({ length: 10 }, (_, i) => tool.execute(String(i), {
@@ -47,7 +45,7 @@ test('Pi public loader loads the package; ten tool calls return inline without l
     }, undefined, undefined, ctx);
     assert.match(JSON.stringify(completion.content), /protocols/);
     await assert.rejects(access(marker), { code: 'ENOENT' });
-    assert.ok(extension.commands.has('mcp'));
+    assert.ok(host.commands.has('mcp'));
     await stop();
     await assert.rejects(tool.execute('closed', { action: 'call', server: 'local', tool: 'echo', args: { text: 'closed' } }, undefined, undefined, ctx), /closed/i);
   } finally {
@@ -63,7 +61,7 @@ for (const mode of ['tui', 'rpc', 'print', 'json'] as const) {
   test(`the extension supports ${mode} without network activity on startup/status`, async () => {
     const { harness } = await import('./harness.ts');
     const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-mode-'));
-    const host = harness(dir, { mode });
+    const host = await harness(dir, { mode });
     try {
       await writeFile(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { unreachable: { url: 'https://does-not-exist.invalid/mcp' } } }));
       await host.emit('session_start');
@@ -78,8 +76,8 @@ for (const mode of ['tui', 'rpc', 'print', 'json'] as const) {
 test('a fresh Pi session starts without inheriting the closed session runtime', async () => {
   const { harness } = await import('./harness.ts');
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-reload-'));
-  const first = harness(dir);
-  const replacement = harness(dir);
+  const first = await harness(dir);
+  const replacement = await harness(dir);
   try {
     await first.emit('session_start'); await first.emit('session_shutdown');
     await replacement.emit('session_start');

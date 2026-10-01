@@ -1,37 +1,63 @@
-import type { ExtensionAPI, ExtensionContext, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import assert from 'node:assert/strict';
+import { DefaultResourceLoader, createAgentSession, ModelRuntime, SessionManager, SettingsManager, type AgentToolResult, type AgentToolUpdateCallback, type ExtensionAPI, type ExtensionFactory } from '@earendil-works/pi-coding-agent';
+import { InMemoryCredentialStore } from '@earendil-works/pi-ai';
 import { installMcp } from '../src/index.ts';
 
-type Handler = (event: any, context: any) => unknown;
 type Dialogs = { select?: (title: string, options: string[]) => string | undefined; confirm?: (title: string) => boolean };
-export function harness(root: string, options: { mode?: 'tui' | 'rpc' | 'print' | 'json'; trusted?: boolean; dependencies?: Parameters<typeof installMcp>[1]; dialogs?: Dialogs } = {}) {
-  const handlers = new Map<string, Handler[]>();
-  const tools = new Map<string, ToolDefinition>();
-  const commands = new Map<string, any>();
+export async function harness(root: string, options: {
+  mode?: 'tui' | 'rpc' | 'print' | 'json'; trusted?: boolean; dependencies?: Parameters<typeof installMcp>[1]; dialogs?: Dialogs;
+  extensions?: ExtensionFactory[]; realPackage?: boolean; cwd?: string;
+} = {}) {
+  const settingsManager = SettingsManager.inMemory({}, { projectTrusted: options.trusted ?? false });
+  const loader = new DefaultResourceLoader({
+    cwd: options.cwd ?? root, agentDir: root, settingsManager, noSkills: true, noThemes: true, noPromptTemplates: true, noContextFiles: true,
+    additionalExtensionPaths: options.realPackage ? [new URL('../index.ts', import.meta.url).pathname] : [],
+    extensionFactories: [
+      ...options.realPackage ? [] : [(pi: ExtensionAPI) => installMcp(pi, {
+        agentDir: root, sharedConfigPath: `${root}/missing-shared-config.json`, jev: async () => undefined, ...options.dependencies,
+      })], ...options.extensions ?? [],
+    ],
+  });
+  await loader.reload();
+  assert.deepEqual(loader.getExtensions().errors, []);
+  const modelRuntime = await ModelRuntime.create({ credentials: new InMemoryCredentialStore(), modelsPath: null,
+    modelsStorePath: `${root}/models-cache.json`, allowModelNetwork: false, refreshOnCreate: false });
+  const { session, extensionsResult } = await createAgentSession({ cwd: options.cwd ?? root, agentDir: root, settingsManager, modelRuntime,
+    sessionManager: SessionManager.inMemory(root), resourceLoader: loader, noTools: 'builtin' });
+  const runner = session.extensionRunner;
   const notices: string[] = [];
-  const messages: { message: any; options: any }[] = [];
+  const messages: { message: Omit<Parameters<ExtensionAPI['sendMessage']>[0], 'content'> & { content: string }; options: NonNullable<Parameters<ExtensionAPI['sendMessage']>[1]> }[] = [];
   const dialogs: { title: string; options?: string[] }[] = [];
-  const context = {
-    cwd: root, mode: options.mode ?? 'tui', hasUI: !['print', 'json'].includes(options.mode ?? 'tui'),
-    isProjectTrusted: () => options.trusted ?? false,
-    ui: {
-      notify: (text: string) => notices.push(text), input: async () => undefined,
-      select: async (title: string, choices: string[]) => { dialogs.push({ title, options: choices }); return options.dialogs?.select?.(title, choices); },
-      confirm: async (title: string) => { dialogs.push({ title }); return options.dialogs?.confirm?.(title) ?? false; },
-    },
-  } as unknown as ExtensionContext;
-  const pi = {
-    sendMessage: (message: unknown, options: unknown) => messages.push({ message, options }),
-    registerMessageRenderer: () => undefined,
-    on: (name: string, handler: Handler) => handlers.set(name, [...handlers.get(name) ?? [], handler]),
-    registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
-    registerCommand: (name: string, command: unknown) => commands.set(name, command),
-  } as unknown as ExtensionAPI;
-  // No test reaches the keyring or the network for Jev unless it brings one.
-  installMcp(pi, { agentDir: root, sharedConfigPath: `${root}/missing-shared-config.json`, jev: async () => undefined, ...options.dependencies });
+  runner.setUIContext(['print', 'json'].includes(options.mode ?? '') ? undefined : {
+    ...runner.getUIContext(), notify: text => notices.push(text), input: async () => undefined,
+    select: async (title, choices) => { dialogs.push({ title, options: choices }); return options.dialogs?.select?.(title, choices); },
+    confirm: async title => { dialogs.push({ title }); return options.dialogs?.confirm?.(title) ?? false; },
+  }, options.mode ?? 'rpc');
+  session.agent.state.messages = [{
+    role: 'assistant', api: 'openai-responses', provider: 'fixture', model: 'fixture', stopReason: 'toolUse', timestamp: 0,
+    content: [{ type: 'toolCall', id: 'test-call', name: 'mcp', arguments: {} }],
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+  }];
+  // Keep OAuth follow-ups observable without starting an LLM request or reaching real credentials.
+  extensionsResult.runtime.sendMessage = (message, sendOptions) => {
+    assert.equal(typeof message.content, 'string');
+    if (typeof message.content === 'string') messages.push({ message: { ...message, content: message.content }, options: sendOptions ?? {} });
+  };
   return {
-    tools, commands, notices, messages, dialogs,
-    async emit(name: string) { for (const handler of handlers.get(name) ?? []) await handler({}, context); },
-    async tool(input: unknown, signal?: AbortSignal) { return tools.get('mcp')!.execute('test-call', input as any, signal, undefined, context); },
-    async command(text: string) { return commands.get('mcp').handler(text, context); },
+    session, runner, notices, messages, dialogs,
+    get tools() { return new Map(runner.getAllRegisteredTools().map(tool => [tool.definition.name, tool.definition])); },
+    get commands() { return new Map(runner.getRegisteredCommands().map(command => [command.name, command])); },
+    async emit(name: 'session_start' | 'session_shutdown') {
+      if (name === 'session_start') await runner.emit({ type: name, reason: 'startup' });
+      else { await runner.emit({ type: name, reason: 'quit' }); session.dispose(); }
+    },
+    async tool(input: unknown, signal?: AbortSignal, update?: AgentToolUpdateCallback): Promise<AgentToolResult<unknown>> {
+      return runner.getToolDefinition('mcp')!.execute('test-call', input, signal, update, runner.createToolContext('test-call', signal));
+    },
+    async native(name: string, input: unknown, signal?: AbortSignal, update?: AgentToolUpdateCallback): Promise<AgentToolResult<unknown>> {
+      const outcome = await runner.createToolContext('native-test', signal).executeTool(name, input, { signal, onUpdate: update });
+      return { ...outcome.result, isError: outcome.isError };
+    },
+    async command(text: string) { return runner.getCommand('mcp')!.handler(text, runner.createCommandContext()); },
   };
 }

@@ -41,7 +41,12 @@ export const renderCall: NonNullable<ToolDefinition['renderCall']> = (args, them
 
 export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result, { expanded, isPartial }, theme, context) => {
   const request = operation(context.args);
-  if (isPartial) return new Container();
+  if (isPartial) {
+    const progress = record(result.details);
+    return typeof progress.progress === 'number'
+      ? mcpRow(theme, request, SYMBOL.active, 'accent', `${progress.progress}${typeof progress.total === 'number' ? ` / ${progress.total}` : ''}`)
+      : new Container();
+  }
   if (context.isError) return mcpRow(theme, request, SYMBOL.error, 'error', 'failed · see the reply', 'error');
   const screened = record(record(result.details).screened);
   if (screened.flagged === true) {

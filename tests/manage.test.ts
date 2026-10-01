@@ -24,11 +24,11 @@ test('server lines and actions follow connection and credential state', () => {
   assert.equal(formatServerLine({ ...base, state: 'connected', era: 'legacy', credential: 'authorized' }), '● linear · connected (legacy) · oauth: signed in');
   assert.equal(formatServerLine({ ...base, auth: 'bearer', env: 'TOKEN', credential: 'env_missing' }), '○ linear · not connected · bearer: $TOKEN missing');
   assert.equal(formatServerLine({ ...base, name: 'x[31my' }), '○ xy · not connected · oauth: signed out');
-  assert.deepEqual(actionsFor({ ...base, state: 'connected', credential: 'authorized' }), ['tools', 'reconnect', 'disconnect', 'auth', 'logout']);
-  assert.deepEqual(actionsFor({ ...base, credential: 'signed_out' }), ['connect', 'disconnect', 'auth']);
-  assert.deepEqual(actionsFor({ ...base, state: 'disconnected', credential: 'pending' }), ['connect', 'link', 'cancel', 'logout']);
-  assert.deepEqual(actionsFor({ ...base, state: 'failed', auth: 'none', credential: undefined }), ['reconnect', 'disconnect']);
-  assert.deepEqual(actionsFor({ ...base, state: 'disabled' }), []);
+  assert.deepEqual(actionsFor({ ...base, state: 'connected', credential: 'authorized' }), ['tools', 'reconnect', 'disconnect', 'auth', 'logout', 'exposure', 'disable']);
+  assert.deepEqual(actionsFor({ ...base, credential: 'signed_out' }), ['connect', 'disconnect', 'auth', 'exposure', 'disable']);
+  assert.deepEqual(actionsFor({ ...base, state: 'disconnected', credential: 'pending' }), ['connect', 'link', 'cancel', 'logout', 'exposure', 'disable']);
+  assert.deepEqual(actionsFor({ ...base, state: 'failed', auth: 'none', credential: undefined }), ['reconnect', 'disconnect', 'exposure', 'disable']);
+  assert.deepEqual(actionsFor({ ...base, state: 'disabled' }), ['enable']);
 });
 
 test('the interactive manager connects, disconnects for the session, and reconnects a stdio server', async () => {
@@ -37,7 +37,7 @@ test('the interactive manager connects, disconnects for the session, and reconne
     command: process.execPath, args: ['--import', resolve('node_modules/tsx/dist/loader.mjs'), resolve('tests/fixtures/server.ts')],
   } } }));
   const select = script([/local/, /^Connect$/, /^Disconnect/, /Back/, /^Close$/]);
-  const host = harness(dir, { dialogs: { select } });
+  const host = await harness(dir, { dialogs: { select } });
   try {
     await host.emit('session_start');
     await host.command('');
@@ -66,7 +66,7 @@ async function oauthSetup(select: ReturnType<typeof script>, confirm = () => tru
     remote: { url: 'https://mcp.example.test/mcp', auth: 'oauth', oauth: { redirectUri: `http://127.0.0.1:${port}/callback` } },
   } }));
   const store = new MemorySecrets();
-  const host = harness(root, { dialogs: { select, confirm }, dependencies: { secretStore: store, fetchFn: oauthFixture().fetchFn } });
+  const host = await harness(root, { dialogs: { select, confirm }, dependencies: { secretStore: store, fetchFn: oauthFixture().fetchFn } });
   return { host, store, async close() { await host.emit('session_shutdown'); await rm(root, { recursive: true, force: true }); } };
 }
 function approve(link: string) {
@@ -136,16 +136,19 @@ test('a pending authorization can be cancelled quietly from the manager', async 
 test('/mcp completes actions, then server names, with the prjct mark', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-complete-'));
   await writeFile(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { linear: { url: 'https://mcp.linear.app/mcp', auth: 'oauth' }, local: { command: 'true' } } }));
-  const host = harness(dir);
+  const host = await harness(dir);
   try {
     const mcp = host.commands.get('mcp');
+    assert.ok(mcp?.description && mcp.getArgumentCompletions);
     assert.match(mcp.description, /^p · MCP servers/);
     const first = await mcp.getArgumentCompletions('');
-    assert.deepEqual(first.map((item: any) => item.value), ['status', 'connect', 'tools', 'reconnect', 'disconnect', 'auth', 'logout']);
-    assert.match(first[1].description, /^p · connect a server$/);
+    assert.ok(first?.[0]?.description);
+    assert.deepEqual(first.map((item: any) => item.value), ['status', 'connect', 'tools', 'reconnect', 'disconnect', 'auth', 'logout', 'enable', 'disable', 'exposure']);
+    assert.match(first[1]?.description ?? '', /^p · connect a server$/);
     await host.emit('session_start');
     await new Promise(resolve => setTimeout(resolve, 50));
     const servers = await mcp.getArgumentCompletions('connect ');
+    assert.ok(servers?.[0]);
     assert.deepEqual(servers.map((item: any) => item.value), ['connect linear', 'connect local']);
     assert.equal(servers[0].description, 'p · connect linear');
   } finally { await host.emit('session_shutdown'); await rm(dir, { recursive: true, force: true }); }

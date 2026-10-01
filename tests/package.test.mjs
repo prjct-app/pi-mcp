@@ -23,6 +23,6 @@ test('Pi discovers exactly the extension declared by the package manifest', asyn
     assert.equal(loader.getSkills().skills.filter(skill => skill.filePath.startsWith(root)).length, 0);
     const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
     assert.equal(manifest.dependencies['@modelcontextprotocol/client'], '2.0.0');
-    assert.equal(manifest.peerDependencies['@earendil-works/pi-coding-agent'], '*');
+    assert.equal(manifest.peerDependencies['@earendil-works/pi-coding-agent'], '>=0.99.1 <1');
   } finally { await rm(agentDir, { recursive: true, force: true }); }
 });

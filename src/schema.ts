@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+export const ExposureSchema = z.enum(['direct', 'deferred', 'codemode', 'hidden']);
+export type Exposure = z.infer<typeof ExposureSchema>;
 const textMap = z.record(z.string(), z.string());
 export const ServerSchema = z.object({
   command: z.string().min(1).optional(), args: z.array(z.string()).max(128).optional(),
@@ -13,6 +15,7 @@ export const ServerSchema = z.object({
   }).strict().optional(),
   protocolVersion: z.enum(['auto', 'legacy', '2026-07-28']).optional(),
   requestTimeoutMs: z.number().int().min(100).max(300000).optional(), disabled: z.boolean().optional(),
+  exposure: ExposureSchema.optional(), toolExposure: z.record(z.string().min(1), ExposureSchema).optional(),
 }).strict();
 
 

@@ -20,7 +20,7 @@ async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'prin
   await writeFile(join(root, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
   const fixture = oauthFixture({ authorizationEndpoint: options.authorizationEndpoint });
   const store = new MemorySecrets();
-  const host = harness(root, { mode: options.mode, dependencies: { secretStore: store, fetchFn: fixture.fetchFn, authTimeoutMs: options.timeoutMs } });
+  const host = await harness(root, { mode: options.mode, dependencies: { secretStore: store, fetchFn: fixture.fetchFn, authTimeoutMs: options.timeoutMs } });
   return { root, servers, fixture, store, host, async close() { await host.emit('session_shutdown'); await rm(root, { recursive: true, force: true }); } };
 }
 function body(result: any) { return JSON.parse(result.content.find((block: any) => block.type === 'text').text); }
