@@ -1,6 +1,9 @@
-import { Client, StreamableHTTPClientTransport, type AuthProvider, type CallToolResult, type CompleteRequestParams, type OAuthClientProvider, type Tool, type Transport } from '@modelcontextprotocol/client';
+import { Client, StreamableHTTPClientTransport, type AuthProvider, type CallToolResult, type CompleteRequestParams, type OAuthClientProvider, type Tool, type Transport, type RequestOptions } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import type { ServerConfig } from './config.ts';
+import { Check } from 'typebox/value';
+import { McpFailure, safeDiagnostic, stderrReason } from './diagnostics.ts';
+import { toolExposure } from './settings.ts';
 
 /** Connection snapshots are replaced, never edited across an await. */
 type Connection = Readonly<{
@@ -10,6 +13,13 @@ type Connection = Readonly<{
   state: 'connecting' | 'connected' | 'failed' | 'resetting';
   tools?: Promise<Tool[]>;
   reset?: Promise<void>;
+  error?: Error;
+  revision: number;
+}>;
+
+type Observer = Readonly<{
+  tools?: (name: string, tools: readonly Tool[], config: ServerConfig) => void;
+  withdraw?: (name?: string) => void;
 }>;
 
 /** Await shared work without cancelling another caller's connection or discovery. */
@@ -36,10 +46,20 @@ export class McpRuntime {
   private readonly offline = new Set<string>();
 
   constructor(
-    private readonly servers: Record<string, ServerConfig>,
+    servers: Record<string, ServerConfig>,
     private readonly authProvider?: (name: string, server: ServerConfig) => AuthProvider | OAuthClientProvider,
     private readonly fetchFn?: typeof fetch,
-  ) {}
+    private readonly observer: Observer = {},
+  ) { this.settings = { servers }; }
+
+  private readonly settings: { servers: Record<string, ServerConfig> };
+  get servers() { return this.settings.servers; }
+
+  async configure(name: string, config: ServerConfig): Promise<void> {
+    await this.reconnect(name);
+    this.settings.servers = { ...this.servers, [name]: config };
+    this.offline.delete(name);
+  }
 
   status() {
     return Object.entries(this.servers).map(([name, config]) => ({
@@ -66,7 +86,7 @@ export class McpRuntime {
     const config = this.config(name);
     if (this.offline.has(name)) throw new ServerOffline(name);
     const existing = this.connections.get(name);
-    if (existing?.state === 'failed' || existing?.state === 'resetting') throw new Error(`MCP server ${name} is unavailable. Use /mcp reconnect ${name}.`);
+    if (existing?.state === 'failed' || existing?.state === 'resetting') throw existing.error ?? new McpFailure('transport', `MCP server ${name} is unavailable. Use /mcp reconnect ${name}.`);
     if (existing) return abortable(existing.ready, signal);
     const mode = config.protocolVersion === '2026-07-28' ? { pin: '2026-07-28' as const } : config.protocolVersion ?? 'auto';
     const client = new Client({ name: 'pi-mcp', version: '0.1.0' }, {
@@ -74,7 +94,14 @@ export class McpRuntime {
       versionNegotiation: { mode, probe: { timeoutMs: 3000, maxRetries: 0 } },
       inputRequired: { autoFulfill: false },
       listMaxPages: 32,
+      listChanged: { tools: { autoRefresh: false, debounceMs: 0, onChanged: () => {
+        const current = this.connections.get(name);
+        if (current?.client !== client) return;
+        this.observer.withdraw?.(name);
+        this.update(name, client, { tools: undefined, revision: current.revision + 1 });
+      } } },
     });
+    const stderr = { tail: '' };
     const transport: Transport = config.url
       ? new StreamableHTTPClientTransport(new URL(config.url), {
         requestInit: { headers: config.headers, redirect: 'error' },
@@ -83,19 +110,28 @@ export class McpRuntime {
         onInsufficientScope: 'throw',
         reconnectionOptions: { maxRetries: 0, maxReconnectionDelay: 1000, initialReconnectionDelay: 1000, reconnectionDelayGrowFactor: 1 },
       })
-      : new StdioClientTransport({ command: config.command!, args: config.args, env: config.env, cwd: config.cwd, stderr: 'ignore' });
-    client.onclose = () => { this.update(name, client, { state: 'failed' }); };
+      : new StdioClientTransport({ command: config.command!, args: config.args, env: config.env, cwd: config.cwd, stderr: 'pipe' });
+    if (transport instanceof StdioClientTransport) transport.stderr?.on('data', (chunk: unknown) => {
+      const text = typeof chunk === 'string' ? chunk : Buffer.isBuffer(chunk) ? chunk.toString('utf8') : '';
+      stderr.tail = (stderr.tail + text).slice(-8192);
+    });
+    client.onclose = () => {
+      if (this.connections.get(name)?.client !== client) return;
+      this.observer.withdraw?.(name);
+      this.update(name, client, { state: 'failed' });
+    };
     client.onerror = () => {}; // Request errors propagate. Never send arbitrary stderr to Pi's terminal.
     const ready = client.connect(transport, { signal: this.shutdown.signal, timeout: config.requestTimeoutMs ?? 15000 }).then(() => {
       this.shutdown.signal.throwIfAborted();
       this.update(name, client, { state: 'connected' });
       return client;
     }).catch(async error => {
-      this.update(name, client, { state: 'failed' });
+      const failure = new McpFailure('transport', stderrReason(stderr.tail) ?? safeDiagnostic(error));
+      this.update(name, client, { state: 'failed', error: failure });
       await client.close().catch(() => {});
-      throw error;
+      throw failure;
     });
-    this.connections.set(name, { client, transport, state: 'connecting', ready });
+    this.connections.set(name, { client, transport, state: 'connecting', ready, revision: 0 });
     return abortable(ready, signal);
   }
 
@@ -107,19 +143,27 @@ export class McpRuntime {
     if (current.tools) return abortable(current.tools, signal);
     const tools = client.listTools(undefined, { signal: this.shutdown.signal, timeout: this.config(name).requestTimeoutMs ?? 15000 })
       .then(result => result.tools.filter(tool => {
-        const visibility = (tool._meta?.ui as { visibility?: unknown } | undefined)?.visibility;
+        const ui = tool._meta?.ui;
+        const visibility = ui && typeof ui === 'object' && 'visibility' in ui ? ui.visibility : undefined;
         return visibility === undefined || (Array.isArray(visibility) && visibility.includes('model'));
-      })).finally(() => { if (this.connections.get(name)?.tools === tools) this.update(name, client, { tools: undefined }); });
+      })).then(tools => {
+        const latest = this.connections.get(name);
+        if (latest?.client !== client || latest.state !== 'connected' || latest.revision !== current.revision) throw new Error('MCP tool list changed or connection was closed');
+        this.observer.tools?.(name, tools, this.config(name));
+        return tools;
+      }).finally(() => { if (this.connections.get(name)?.tools === tools) this.update(name, client, { tools: undefined }); });
     this.update(name, client, { tools });
     return abortable(tools, signal);
   }
 
-  async call(name: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult> {
+  async call(name: string, tool: string, args: Record<string, unknown>, signal?: AbortSignal, onprogress?: RequestOptions['onprogress']): Promise<CallToolResult> {
     const client = await this.connect(name, signal);
     const tools = await this.tools(name, signal);
-    if (!tools.some(item => item.name === tool)) throw new Error(`Unknown MCP tool: ${tool}`);
+    const advertised = tools.find(item => item.name === tool);
+    if (!advertised || toolExposure(this.config(name), tool) === 'hidden') throw new Error(`Unknown MCP tool (or hidden): ${tool}`);
+    if (!Check(advertised.inputSchema, args)) throw new McpFailure('arguments', 'Invalid MCP tool arguments. Check its discovered input schema.');
     if (this.connections.get(name)?.client !== client) throw new Error('MCP connection was replaced');
-    return client.callTool({ name: tool, arguments: args }, this.requestOptions(name, signal));
+    return client.callTool({ name: tool, arguments: args }, { ...this.requestOptions(name, signal), onprogress });
   }
 
   private requestOptions(name: string, signal?: AbortSignal) {
@@ -173,7 +217,8 @@ export class McpRuntime {
   }
 
   async reconnect(name: string): Promise<void> {
-    this.config(name);
+    if (!Object.hasOwn(this.servers, name)) throw new Error('Unknown MCP server');
+    this.observer.withdraw?.(name);
     const current = this.connections.get(name);
     if (!current) return;
     if (current.reset) return current.reset;
@@ -187,6 +232,7 @@ export class McpRuntime {
 
   close(): Promise<void> {
     if (!this.slot.closing) {
+      this.observer.withdraw?.();
       this.shutdown.abort(new Error('MCP runtime is closed'));
       this.slot.closing = Promise.allSettled([...this.connections.values()].map(async connection => {
         await connection.client.close();

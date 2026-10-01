@@ -29,7 +29,7 @@ test('authorization links render as clickable OSC 8 hyperlinks in the conversati
 
 test('discovery schemas remain available to the model but never appear in collapsed or expanded tool rows', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-render-'));
-  const host = harness(dir);
+  const host = await harness(dir);
   try {
     await writeFile(join(dir, 'mcp.json'), JSON.stringify({ mcpServers: { local: {
       command: process.execPath, args: ['--import', resolve('node_modules/tsx/dist/loader.mjs'), resolve('tests/fixtures/server.ts')],
@@ -47,7 +47,7 @@ test('discovery schemas remain available to the model but never appear in collap
 
 test('raw schemas, response bodies and authorization parameters stay out of tool rows even for old or truncated results', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-render-'));
-  const host = harness(dir);
+  const host = await harness(dir);
   const cases = [
     { content: [{ type: 'text', text: JSON.stringify({ items: [{ name: 'fixture', inputSchema: { secret: 'SCHEMA_BODY' }, outputSchema: { secret: 'SCHEMA_BODY' } }], total: 1 }) }], details: {} },
     { content: [{ type: 'text', text: JSON.stringify({ status: 'authorization_required', authorizationUrl: 'https://example.test/?state=AUTH_PARAMETERS' }) }], details: {} },
@@ -85,7 +85,7 @@ test('slash-command tool lists sanitize before capping and report hidden names a
 test('status rendering gives a compact health summary and a safe expanded server tree', async () => {
   const { visibleWidth } = await import('@earendil-works/pi-tui');
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-render-'));
-  const host = harness(dir);
+  const host = await harness(dir);
   try {
     const tool = host.tools.get('mcp')!;
     const result = { content: [{ type: 'text' as const, text: JSON.stringify([
@@ -115,7 +115,7 @@ test('status rendering gives a compact health summary and a safe expanded server
 test('headers hide raw arguments and compact renderers handle errors, progress, narrow terminals and theme changes', async () => {
   const { visibleWidth } = await import('@earendil-works/pi-tui');
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-render-'));
-  const host = harness(dir);
+  const host = await harness(dir);
   try {
     const tool = host.tools.get('mcp')!;
     const args = { action: 'call', server: 'fixture', tool: 'echo', args: { text: 'PRIVATE_ARGUMENT' } };
