@@ -1,6 +1,6 @@
 {
   "name": "@prjct.app/pi-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A terminal-first MCP client for Pi. No automatic browsers or MCP App rendering.",
   "type": "module",
   "license": "MIT",
