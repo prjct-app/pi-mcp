@@ -156,3 +156,16 @@ test('an existing extension tool cannot be replaced by an MCP registration', asy
     assert.equal(host.tools.get(native('echo'))?.description, 'Owner');
   } finally { await host.cleanup(); }
 });
+
+test('a long listing carries one sentence per tool; a narrow one carries schemas', async () => {
+  const host = await featureHost();
+  try {
+    const listing = JSON.parse(text(await host.tool(discover)).split('\n[')[0]!);
+    if (listing.items.length > 3) {
+      assert.equal(listing.items.some((item: Record<string, unknown>) => 'inputSchema' in item), false);
+      assert.match(listing.schemas, /tool=<name>/);
+      const one = JSON.parse(text(await host.tool({ ...discover, tool: listing.items[0].name })).split('\n[')[0]!);
+      assert.ok(one.items[0].inputSchema, 'naming the tool brings its schema');
+    }
+  } finally { await host.cleanup(); }
+});

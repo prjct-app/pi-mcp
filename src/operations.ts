@@ -59,13 +59,26 @@ export class Operations {
 
   private async call(server: string, tool: string, args: Record<string, unknown>, signal: AbortSignal | undefined, update: AgentToolUpdateCallback | undefined, ctx: ExtensionToolContext) {
     const active = await this.sessions.get(ctx);
-    const result = await this.resolve(active, server, ctx, () => active.runtime.call(server, tool, args, signal, progress => {
+    const once = () => this.resolve(active, server, ctx, () => active.runtime.call(server, tool, args, signal, progress => {
       if (signal?.aborted) return;
       const current = Number.isFinite(progress.progress) ? progress.progress : 0;
       const total = typeof progress.total === 'number' && Number.isFinite(progress.total) ? progress.total : undefined;
       update?.({ content: [{ type: 'text', text: `MCP progress: ${current}${total === undefined ? '' : ` / ${total}`}` }], details: { progress: current, total } });
     }), signal);
+    // A read-only call that timed out is safe to repeat once; anything that may
+    // change data is never repeated blindly.
+    const result = await once().catch(async (error: unknown) => {
+      if (signal?.aborted || !timedOut(error) || !(await this.readOnly(active, server, tool, signal))) throw error;
+      return once();
+    });
     return this.finish('call', server, result, signal);
+  }
+
+  /** Whether the server marks this tool read-only (MCP readOnlyHint). Unknown is not read-only. */
+  private async readOnly(active: Awaited<ReturnType<Sessions['get']>>, server: string, tool: string, signal: AbortSignal | undefined): Promise<boolean> {
+    const tools: unknown = await active.runtime.tools(server, signal).catch(() => undefined);
+    const found = Array.isArray(tools) ? tools.find((item: { name?: unknown }) => item?.name === tool) as { annotations?: { readOnlyHint?: unknown } } | undefined : undefined;
+    return found?.annotations?.readOnlyHint === true;
   }
 
   async execute(params: Static<typeof ProxyParameters>, signal: AbortSignal | undefined, update: AgentToolUpdateCallback | undefined, ctx: ExtensionToolContext): Promise<AgentToolResult> {
@@ -93,9 +106,16 @@ export class Operations {
           const tools = (await runtime.tools(server, signal)).filter(tool =>
             toolExposure(active.servers[server]!, tool.name) !== 'hidden' && (!params.tool || params.tool === tool.name) && terms.every(term => `${tool.name} ${tool.description ?? ''}`.toLowerCase().includes(term)));
           const offset = params.offset ?? 0;
-          const items = tools.slice(offset, offset + (params.limit ?? 20)).map(({ name, description, inputSchema, outputSchema, annotations }) => ({
+          const page = tools.slice(offset, offset + (params.limit ?? 20));
+          // A listing was a fifth of all MCP tokens (jira alone 4.3k per call): full
+          // schemas only once the choice is down to a few tools; a list carries
+          // each tool's first sentence, and the schema comes on a narrower call.
+          const detailed = Boolean(params.tool) || page.length <= SCHEMA_LIMIT;
+          const items = page.map(({ name, description, inputSchema, outputSchema, annotations }) => detailed ? {
             name, description, inputSchema, outputSchema, annotations, nativeName: nativeToolName(server, name), exposure: toolExposure(active.servers[server]!, name),
-          }));
+          } : { name, nativeName: nativeToolName(server, name), description: firstSentence(description), ...(annotations?.readOnlyHint ? { readOnly: true } : {}) });
+          if (!detailed) return { items, total: tools.length, omitted: Math.max(0, tools.length - offset - items.length), nextOffset: offset + items.length < tools.length ? offset + items.length : undefined,
+            schemas: `Ask with tool=<name> (or a query matching ${SCHEMA_LIMIT} or fewer) for the input schema.` };
           return { items, total: tools.length, omitted: Math.max(0, tools.length - offset - items.length), nextOffset: offset + items.length < tools.length ? offset + items.length : undefined };
         }
         case 'resources': return runtime.resources(server, signal);
@@ -120,3 +140,15 @@ export class Operations {
 
   async close(): Promise<void> { this.native.close(); await this.sessions.close(); await this.output.close(); }
 }
+
+const timedOut = (error: unknown): boolean =>
+  /REQUEST_TIMEOUT|timed? ?out|ETIMEDOUT/i.test(`${String((error as { code?: unknown })?.code ?? '')} ${error instanceof Error ? error.message : String(error)}`);
+
+/** A listing with this many tools or fewer carries full schemas. */
+const SCHEMA_LIMIT = 3;
+const firstSentence = (text: string | undefined): string | undefined => {
+  const line = text?.split('\n').map(part => part.trim()).find(Boolean);
+  if (!line) return undefined;
+  const sentence = /^(.{20,}?[.!?])(\s|$)/u.exec(line)?.[1] ?? line;
+  return sentence.length > 160 ? `${sentence.slice(0, 159)}…` : sentence;
+};

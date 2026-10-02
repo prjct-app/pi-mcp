@@ -1,10 +1,18 @@
 # pi-mcp
 
+[![pi-mcp — for PI Agent](https://raw.githubusercontent.com/prjct-app/pi-mcp/main/docs/cover.png)](https://pi.dev)
+
 A terminal-first MCP client for Pi. No automatic browsers, no MCP App rendering.
 
-**Status**: development preview. Tested with Pi 0.85.1, MCP SDK 2.0.0, Node 22.22.2 (macOS). Node ≥ 22.19.
+**Status**: development preview. Development targets Pi 0.99.1, MCP SDK 2.0.0, Node 22.22.2 (macOS). Node ≥ 22.19.
 
 ---
+
+## Install
+
+```sh
+pi install npm:@prjct.app/pi-mcp
+```
 
 ## Local integration
 
