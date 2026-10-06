@@ -1,3 +1,9 @@
+## 0.2.0 (2026-10-06)
+
+- Remove classifier screening and its credential lookup.
+- Return server results directly for the active model to interpret.
+- Isolate tests from personal credentials and settings.
+
 ## 0.1.4 (2026-10-06)
 
 - Update MCP client to 2.3.1 to fix the credential-disclosure advisory.

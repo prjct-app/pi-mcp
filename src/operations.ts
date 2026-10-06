@@ -3,8 +3,6 @@ import { StringEnum } from '@earendil-works/pi-ai';
 import { Type, type Static } from 'typebox';
 import { Check } from 'typebox/value';
 import { publishAuthorizationLink } from './auth-link.ts';
-import { connectJev, type Jev } from './jev.ts';
-import { banner, screen, SCREENED_ACTIONS, type ScreenCache } from './screen.ts';
 import { Output } from './output.ts';
 import { NativeTools, nativeToolName } from './native-tools.ts';
 import { toolExposure } from './settings.ts';
@@ -32,8 +30,6 @@ export class Operations {
   readonly sessions: Sessions;
   readonly published = new Set<string>();
   private readonly output = new Output();
-  private readonly jev: { pending?: Promise<Jev | undefined> } = {};
-  private readonly screenedBefore: ScreenCache = new Map();
 
   constructor(private readonly pi: ExtensionAPI, private readonly options: McpOptions) {
     this.native = new NativeTools(pi, (server, tool, args, signal, update, ctx) => this.call(server, tool, args, signal, update, ctx));
@@ -46,15 +42,7 @@ export class Operations {
 
   private async finish(action: string, server: string, value: unknown, signal?: AbortSignal): Promise<AgentToolResult> {
     publishAuthorizationLink(this.pi, server, value, this.published);
-    const rendered = await this.output.result(value);
-    if (!SCREENED_ACTIONS.has(action) || isLogin(value)) return rendered;
-    const text = rendered.content.flatMap(block => block.type === 'text' ? [block.text] : []).join('\n');
-    if (!text.trim()) return rendered;
-    this.jev.pending ??= (this.options.jev ?? connectJev)();
-    const verdict = await screen(await this.jev.pending, text, signal, this.screenedBefore);
-    if (!verdict?.flagged) return rendered;
-    const content = [{ type: 'text' as const, text: banner(server, verdict.p) }, ...rendered.content];
-    return { ...rendered, content, structuredContent: { ...rendered.structuredContent, content: content.map(block => ({ ...block })) }, details: { ...rendered.details, screened: verdict } };
+    return this.output.result(value);
   }
 
   private async call(server: string, tool: string, args: Record<string, unknown>, signal: AbortSignal | undefined, update: AgentToolUpdateCallback | undefined, ctx: ExtensionToolContext) {
