@@ -67,3 +67,15 @@ test('preview publication requires an explicit repository release gate', () => {
   const workflow = readFileSync(require.resolve('../workflows/release.yml'), 'utf8');
   assert.equal((workflow.match(/vars\.PI_MCP_RELEASE_ENABLED == 'true'/g) || []).length, 2);
 });
+
+
+test('already-published releases require an ancestor tag, identical packed files and registry version', () => {
+  const { alreadyPublished } = require('./already-published.cjs');
+  const manifest = { name: '@prjct.app/fixture', version: '0.1.0' };
+  const calls = [];
+  const run = args => { calls.push(args); return args[1] === 'pack' ? '[{"files":[{"path":"index.ts"},{"path":"package.json"}]}]' : args[1] === 'view' ? '"0.1.0"' : ''; };
+  assert.equal(alreadyPublished(manifest, run), true);
+  assert.ok(calls.some(args => args.includes('index.ts') && args.includes('--exit-code')));
+  for (const fail of ['merge-base', 'diff', 'view']) assert.equal(alreadyPublished(manifest, args => { if (args[1] === fail) throw new Error('unverified'); return run(args); }), false);
+  assert.equal(alreadyPublished(manifest, args => args[1] === 'view' ? '"0.0.9"' : run(args)), false);
+});

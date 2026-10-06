@@ -11,7 +11,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 test('Pi discovers exactly the extension declared by the package manifest', async () => {
   const agentDir = await realpath(await mkdtemp(join(tmpdir(), 'pi-mcp-package-')));
   try {
-    await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ packages: [root] }));
+    await writeFile(join(agentDir, 'settings.json'), JSON.stringify({ packages: [root], extensions: ['-builtin:mcp'] }));
     const loader = new DefaultResourceLoader({ cwd: agentDir, agentDir, noContextFiles: true });
     await loader.reload();
     const extensions = loader.getExtensions();
@@ -22,8 +22,8 @@ test('Pi discovers exactly the extension declared by the package manifest', asyn
     assert.deepEqual(loader.getThemes().themes, []);
     assert.equal(loader.getSkills().skills.filter(skill => skill.filePath.startsWith(root)).length, 0);
     const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
-    assert.equal(manifest.dependencies['@modelcontextprotocol/client'], '2.0.0');
+    assert.equal(manifest.dependencies['@modelcontextprotocol/client'], '2.3.1');
     assert.equal(manifest.peerDependencies['@earendil-works/pi-coding-agent'], '*');
-    assert.equal(manifest.devDependencies['@earendil-works/pi-coding-agent'], '0.99.1');
+    assert.equal(manifest.devDependencies['@earendil-works/pi-coding-agent'], '1.0.3');
   } finally { await rm(agentDir, { recursive: true, force: true }); }
 });

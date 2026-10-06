@@ -30,7 +30,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
-      - name: Enforce grouped release promotion
+      - name: Enforce repository release promotion
         env:
           GITHUB_BASE_REF: ${{ github.base_ref }}
           GITHUB_HEAD_REF: ${{ github.head_ref }}
@@ -86,8 +86,11 @@ jobs:
             echo "A newer main revision will be released."
             echo "publish=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Verify an already published package
+        id: published
+        run: node .github/release/already-published.cjs
       - name: Publish version and GitHub release
-        if: steps.current.outputs.publish == 'true'
+        if: steps.current.outputs.publish == 'true' && steps.published.outputs.exists != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Temporary authorized fallback; remove the repository secret after release.
