@@ -3,7 +3,6 @@ import type { OAuthManager, SecretStore } from './auth.ts';
 import { loadConfiguration, loadConfig, type ConfigOptions, type ServerConfig } from './config.ts';
 import type { McpRuntime } from './runtime.ts';
 import type { AuthLinks, LoginResult } from './login.ts';
-import type { ConnectJev } from './jev.ts';
 import type { NativeTools } from './native-tools.ts';
 import { safeDiagnostic, McpFailure } from './diagnostics.ts';
 import { saveServerSettings, type SettingsPatch } from './settings.ts';
@@ -16,7 +15,7 @@ function loadModules(): Promise<Modules> {
   return loaded.pending;
 }
 export type McpOptions = {
-  agentDir?: string; sharedConfigPath?: string; secretStore?: SecretStore; fetchFn?: typeof fetch; authTimeoutMs?: number; jev?: ConnectJev;
+  agentDir?: string; sharedConfigPath?: string; secretStore?: SecretStore; fetchFn?: typeof fetch; authTimeoutMs?: number;
 };
 export interface Services {
   runtime: McpRuntime; auth: OAuthManager; readonly servers: Record<string, ServerConfig>; sources: Record<string, string>; links: AuthLinks; modules: Modules;

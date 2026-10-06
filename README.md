@@ -175,7 +175,6 @@ When credentials are missing, the tool returns `authorization_required` and plac
 - Connections are lazy and resident until reset or session teardown.
 - No automatic replay of failures, polling loop, or idle reconnect.
 - Server descriptions/results are untrusted data (not user consent).
-- Optional [Jev](https://typesafe.ai) screening requires `PI_MCP_JEV=1` and a TypeSafe key (`TYPESAFE_API_KEY` or the shared OS keyring entry). It examines the first 6,000 characters of `call`, `read` and `prompt` results. A score above 0.7 adds a third-party-data banner; the result remains whole. A 3-second timeout or an error returns the original result. Screening is off by default; having a credential does not activate it.
 - A configured stdio executable can spawn programs itself.
 
 ---
