@@ -1,3 +1,10 @@
+## [0.1.1](https://github.com/prjct-app/pi-mcp/compare/v0.1.0...v0.1.1) (2026-10-02)
+
+### Bug Fixes
+
+* install the published TUI dependency in packages and CI ([f2446d7](https://github.com/prjct-app/pi-mcp/commit/f2446d73e8bce417de408329e65051b4a9496d29))
+* prepare public packages and automatic runtime dependencies ([50779a2](https://github.com/prjct-app/pi-mcp/commit/50779a250832bd71b10b39ce2fb6539fe254c13c))
+
 # Changelog
 
 ## Unreleased
