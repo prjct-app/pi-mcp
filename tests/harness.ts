@@ -14,7 +14,7 @@ export async function harness(root: string, options: {
     additionalExtensionPaths: options.realPackage ? [new URL('../index.ts', import.meta.url).pathname] : [],
     extensionFactories: [
       ...options.realPackage ? [] : [(pi: ExtensionAPI) => installMcp(pi, {
-        agentDir: root, sharedConfigPath: `${root}/missing-shared-config.json`, jev: async () => undefined, ...options.dependencies,
+        agentDir: root, sharedConfigPath: `${root}/missing-shared-config.json`, ...options.dependencies,
       })], ...options.extensions ?? [],
     ],
   });
