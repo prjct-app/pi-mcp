@@ -1,3 +1,7 @@
+## 0.1.2 (2026-10-06)
+
+- Make Jev screening opt-in and preserve complete MCP results.
+
 ## [0.1.1](https://github.com/prjct-app/pi-mcp/compare/v0.1.0...v0.1.1) (2026-10-02)
 
 ### Bug Fixes
