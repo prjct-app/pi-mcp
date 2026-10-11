@@ -96,7 +96,7 @@ Requires an exact HTTPS issuer. No redirect URIs or client metadata docs. The se
 {
   "mcpServers": {
     "notion": { "url": "https://mcp.notion.com/mcp", "auth": "oauth" },
-    "stripe": { "url": "https://mcp.stripe.com", "auth": "bearer", "bearerTokenEnv": "STRIPE_API_KEY" },
+    "stripe": { "url": "https://mcp.stripe.com", "auth": "oauth" },
     "github": { "url": "https://api.githubcopilot.com/mcp/", "auth": "bearer", "bearerTokenEnv": "GITHUB_PERSONAL_ACCESS_TOKEN" },
     "supabase": { "url": "https://mcp.supabase.com/mcp", "auth": "oauth" },
     "mobbin": { "url": "https://api.mobbin.com/mcp", "auth": "oauth" }
@@ -105,6 +105,8 @@ Requires an exact HTTPS issuer. No redirect URIs or client metadata docs. The se
 ```
 
 Official references: [Notion MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp), [Stripe MCP](https://docs.stripe.com/mcp), [GitHub remote MCP](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md), [Supabase MCP](https://supabase.com/docs/guides/getting-started/mcp), [Mobbin MCP](https://docs.mobbin.com/mcp/introduction).
+
+Stripe uses OAuth for interactive sign-in: run `/mcp auth stripe` and follow the authorization link. If you previously configured `bearerTokenEnv`, remove it when switching to `"auth": "oauth"`, then reload Pi before authenticating. For unattended clients, Stripe also supports an agent API key through `"auth": "bearer"` and `"bearerTokenEnv": "STRIPE_AGENT_API_KEY"`; that environment variable must be set before starting Pi.
 
 Supabase accepts `?project_ref=<ref>&read_only=true` on the URL to scope the server to one project and a read-only Postgres role; `features=database,docs` limits the tool groups. For CI, use `"auth": "bearer", "bearerTokenEnv": "SUPABASE_ACCESS_TOKEN"` with a personal access token instead of OAuth.
 
