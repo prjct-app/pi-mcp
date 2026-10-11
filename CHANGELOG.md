@@ -1,3 +1,7 @@
+## 0.2.1 (2026-10-09)
+
+- Keep MCP usage guidance in the `mcp` tool description instead of the system prompt.
+
 ## 0.2.0 (2026-10-06)
 
 - Remove classifier screening and its credential lookup.
