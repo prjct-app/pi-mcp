@@ -1,3 +1,8 @@
+## 0.2.2 (2026-10-12)
+
+- OAuth locks live in `${PRJCT_HOME:-~/.prjct}/pi-mcp/locks`, outside Pi's folder. They are short-lived, so nothing is migrated.
+- Tests run with temporary Pi and prjct folders.
+
 ## 0.2.1 (2026-10-09)
 
 - Keep MCP usage guidance in the `mcp` tool description instead of the system prompt.

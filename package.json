@@ -1,6 +1,6 @@
 {
   "name": "@prjct.app/pi-mcp",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "A terminal-first MCP client for Pi. No automatic browsers or MCP App rendering.",
   "type": "module",
   "license": "MIT",
@@ -36,7 +36,7 @@
   },
   "scripts": {
     "check": "tsc --noEmit && npm run check:immutable",
-    "test": "node --import ./tests/isolate.mjs --import tsx --test --test-concurrency=1 tests/*.test.ts tests/*.test.mjs",
+    "test": "export PI_CODING_AGENT_DIR=\"$(mktemp -d)\" PRJCT_HOME=\"$(mktemp -d)\" && node --import ./tests/isolate.mjs --import tsx --test --test-concurrency=1 tests/*.test.ts tests/*.test.mjs",
     "check:package": "npm pack --dry-run --ignore-scripts",
     "build": "rm -rf build && mkdir -p build && npm pack --ignore-scripts --pack-destination build >/dev/null && tar -xzf build/*.tgz -C build --strip-components=1 && rm -f build/*.tgz",
     "check:immutable": "! grep -rn '\\blet\\b' src/ || (echo 'Use immutable values: no let bindings in src/' && exit 1)",
