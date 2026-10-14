@@ -43,8 +43,10 @@ export async function harness(root: string, options: {
     assert.equal(typeof message.content, 'string');
     if (typeof message.content === 'string') messages.push({ message: { ...message, content: message.content }, options: sendOptions ?? {} });
   };
+  const userMessages: { content: unknown; options: unknown }[] = [];
+  extensionsResult.runtime.sendUserMessage = (content, sendOptions) => { userMessages.push({ content, options: sendOptions }); };
   return {
-    session, runner, notices, messages, dialogs,
+    session, runner, notices, messages, dialogs, userMessages,
     get tools() { return new Map(runner.getAllRegisteredTools().map(tool => [tool.definition.name, tool.definition])); },
     get commands() { return new Map(runner.getRegisteredCommands().map(command => [command.name, command])); },
     async emit(name: 'session_start' | 'session_shutdown') {

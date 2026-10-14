@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent';
 import type { OAuthManager, SecretStore } from './auth.ts';
 import { loadConfiguration, loadConfig, type ConfigOptions, type ServerConfig } from './config.ts';
@@ -5,7 +6,7 @@ import type { McpRuntime } from './runtime.ts';
 import type { AuthLinks, LoginResult } from './login.ts';
 import type { NativeTools } from './native-tools.ts';
 import { safeDiagnostic, McpFailure } from './diagnostics.ts';
-import { saveServerSettings, type SettingsPatch } from './settings.ts';
+import { addServer, saveServerSettings, type SettingsPatch } from './settings.ts';
 
 type Modules = Readonly<{ auth: typeof import('./auth.ts'); runtime: typeof import('./runtime.ts'); login: typeof import('./login.ts') }>;
 const loaded: { pending?: Promise<Modules>; ready?: Modules } = {};
@@ -86,6 +87,23 @@ export class Sessions {
     if (!server) throw new McpFailure('configuration', 'MCP server was removed while saving its settings.');
     active.links.cancel(name);
     await active.runtime.configure(name, server);
+  }
+
+  /** Where a new server would be saved, and whether it replaces one already defined there. Other sources are never edited. */
+  async target(ctx: ExtensionContext, name: string): Promise<{ path: string; replaces: boolean }> {
+    const path = join(this.options.agentDir ?? getAgentDir(), 'mcp.json');
+    const configuration = await loadConfiguration(this.configOptions(ctx));
+    const source = configuration.sources[name];
+    if (source && source !== path) throw new McpFailure('configuration', `MCP server ${name} is already defined in ${source}. Choose another name or edit that file; nothing was saved.`);
+    if (!source && Object.keys(configuration.servers).length >= 64) throw new McpFailure('configuration', 'At most 64 MCP servers are supported; nothing was saved.');
+    return { path, replaces: Boolean(source) };
+  }
+
+  /** Save a confirmed server and start a fresh session so authentication and discovery see it. */
+  async add(ctx: ExtensionContext, path: string, name: string, config: unknown): Promise<Services> {
+    await addServer(path, name, config);
+    await this.start(ctx);
+    return this.get(ctx);
   }
 
   async start(ctx: ExtensionContext): Promise<void> {

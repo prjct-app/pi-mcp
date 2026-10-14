@@ -158,7 +158,7 @@ export function serverPanel(control: ServerControl, initial: ServerInfo[], notif
       };
     },
     actions,
-    empty: 'No MCP servers configured. Add them to ~/.pi/agent/mcp.json.',
+    empty: 'No MCP servers configured. /mcp add <docs-url> sets one up, or edit ~/.pi/agent/mcp.json.',
     subscribe: listener => { changed.add(listener); const timer = setInterval(() => { void reload().catch(() => undefined); }, 3000); timer.unref?.(); return () => { changed.delete(listener); clearInterval(timer); }; },
     reload,
   };
