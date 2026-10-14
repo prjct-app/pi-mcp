@@ -1,3 +1,9 @@
+## [0.4.0](https://github.com/prjct-app/pi-mcp/compare/v0.3.1...v0.4.0) (2026-10-14)
+
+### Features
+
+* add servers from the /mcp panel ([51f636c](https://github.com/prjct-app/pi-mcp/commit/51f636c6485f5393347e435ab504af27142495df))
+
 ## [0.3.1](https://github.com/prjct-app/pi-mcp/compare/v0.3.0...v0.3.1) (2026-10-14)
 
 ## 0.3.0 (2026-10-13)
