@@ -8,18 +8,17 @@ Follows pi-team's separation of integration and publication:
 - After a release version/changelog commit, synchronize `main` back into `develop`
   through an authorized PR before starting the next batch.
 
-## Preview safety gate
+## Publication
 
-This repository is private on GitHub and the package remains `private: true`. Publishing is disabled.
-The release workflow's publication jobs also require the repository variable
-`PI_MCP_RELEASE_ENABLED` to equal `true`. Neither creating these files nor running
-tests authorizes pushing, opening/merging a PR, or publishing.
+Only the Release workflow publishes, through npm trusted publishing (GitHub OIDC):
+no npm token is stored anywhere, and every version carries a provenance statement.
+Never run `npm publish` by hand; `prepublishOnly` refuses outside GitHub Actions.
 
-Before enabling publication, obtain explicit user authorization, verify the
-intended remote and npm identity, complete manual compatibility checks, configure
-npm trusted publishing for `.github/workflows/release.yml`, remove `private: true`
-in a reviewed PR, and explicitly enable the repository release variable. The private remote and integration workflow are configured; no publication
-activation has been performed.
+- npmjs.com → `@prjct.app/pi-mcp` → Settings → Trusted Publisher: GitHub Actions,
+  organization `prjct-app`, repository `pi-mcp`, workflow `release.yml`, no environment.
+- The repository variable `PI_MCP_RELEASE_ENABLED` must equal `true`.
+- To check the setup without publishing, run the Release workflow manually with
+  `dry_run`: semantic-release verifies the OIDC exchange before anything else.
 
 ## Checks and versioning
 
