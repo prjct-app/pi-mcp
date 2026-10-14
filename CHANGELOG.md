@@ -1,3 +1,5 @@
+## [0.3.1](https://github.com/prjct-app/pi-mcp/compare/v0.3.0...v0.3.1) (2026-10-14)
+
 ## 0.3.0 (2026-10-13)
 
 - `/mcp add <url>` sets up a server from its MCP endpoint or its documentation page. An endpoint is checked directly (no sign-in, OAuth, or a token from an environment variable) and you only pick a name. A page goes to the agent, which reads it and asks you what only you can decide.
