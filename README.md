@@ -116,7 +116,7 @@ Supabase accepts `?project_ref=<ref>&read_only=true` on the URL to scope the ser
 
 | Command | Result |
 |---|---|
-| `/mcp` | Interactive manager: pick a server, see its connection and credential state, and act on it |
+| `/mcp` | Interactive manager: pick a server, see its connection and credential state, and act on it; `n` adds a server from its URL |
 | `/mcp status` | Connection and credential state per server (does not connect) |
 | `/mcp add <url>` | Set up a server from its MCP endpoint or its documentation page (see below) |
 | `/mcp tools <server>` | Compact list of up to 20 tools (connects on demand) |
@@ -130,7 +130,7 @@ The manager shows only actions that fit the server's state: connect, list tools,
 
 ## Add a server from a URL
 
-`/mcp add <url>` takes either kind of URL and walks you through the rest. `/mcp add` alone asks for the URL.
+`/mcp add <url>` takes either kind of URL and walks you through the rest. `/mcp add` alone, or `n` in the `/mcp` panel, asks for the URL.
 
 - **MCP endpoint**, for example `https://mcp.svelte.dev/mcp`. pi-mcp sends one MCP `initialize` request, with no credentials and no redirects followed, and reads how the server signs in. A JSON-RPC reply means no sign-in. A 401 with protected-resource metadata means OAuth, and you get the usual authorization link after saving. A 401 without it means a token: you are asked for the **name of the environment variable** that holds it, never the token itself. Then you pick a name (suggested from the host, `svelte` here). No model is involved.
 - **Documentation page**, for example `https://svelte.dev/docs/ai/mcp`. The page goes to the agent as a visible message. The agent reads the page, follows its links to the setup details, asks you whatever only you can decide (which setup, which account, where a token lives), and writes the entry with `mcp({ action: "add", ... })`.

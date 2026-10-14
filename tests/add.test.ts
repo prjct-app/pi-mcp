@@ -142,7 +142,7 @@ test('/mcp add with an endpoint URL asks only for the name, then saves, connects
     const asked: string[] = [];
     h.runner.getUIContext().input = async title => { asked.push(title); return ''; };
     await h.command(`add ${web.origin}/mcp`);
-    assert.deepEqual(asked, [`Name for 127.0.0.1:${web.origin.split(':').at(-1)} (Enter: local)`]);
+    assert.deepEqual(asked, [`Add 127.0.0.1:${web.origin.split(':').at(-1)} · Name (Enter: local)`]);
     assert.deepEqual(h.confirmations, ['Add MCP server local?']);
     assert.deepEqual(JSON.parse(await readFile(h.path, 'utf8')), { mcpServers: { local: { url: `${web.origin}/mcp` } } });
     assert.match(h.notices.at(-1) ?? '', /^Connected · saved in .*\n.*echo/s);
@@ -157,7 +157,7 @@ test('/mcp add with a token endpoint asks where the token lives and never asks f
     const asked: string[] = [];
     h.runner.getUIContext().input = async title => { asked.push(title); return asked.length === 1 ? 'tokens' : 'PI_MCP_TEST_UNSET_TOKEN'; };
     await h.command(`add ${web.origin}/token`);
-    assert.match(asked[1] ?? '', /needs a token\. Environment variable that holds it/);
+    assert.match(asked[1] ?? '', /needs a token · Environment variable \(Enter: TOKENS_TOKEN\)/);
     assert.deepEqual(JSON.parse(await readFile(h.path, 'utf8')).mcpServers.tokens, { url: `${web.origin}/token`, auth: 'bearer', bearerTokenEnv: 'PI_MCP_TEST_UNSET_TOKEN' });
     assert.match(h.notices.at(-1) ?? '', /Set \$PI_MCP_TEST_UNSET_TOKEN where Pi starts, then restart Pi/);
   } finally { await h.cleanup(); await web.close(); }
@@ -184,7 +184,7 @@ test('/mcp add without a URL asks for one', async () => {
     const asked: string[] = [];
     h.runner.getUIContext().input = async title => { asked.push(title); return undefined; };
     await h.command('add');
-    assert.deepEqual(asked, ['MCP server URL']);
+    assert.deepEqual(asked, ['Add an MCP server · URL']);
     assert.equal(h.userMessages.length, 0);
   } finally { await h.cleanup(); }
 });
@@ -198,4 +198,18 @@ test('usage of add costs nothing per request: it arrives only when add is used',
     await assert.rejects(h.tool({ action: 'add' }), /server=<short name.*config=.*do not ask for approval first/);
     await assert.rejects(h.tool({ action: 'add', server: 'docs' }), /an endpoint URL alone/);
   } finally { await h.cleanup(); }
+});
+
+test('the /mcp manager offers adding a server, also when none is configured', async () => {
+  const web = await endpoints();
+  const h = await host();
+  try {
+    const lists: string[][] = [];
+    h.runner.getUIContext().select = async (_title, options) => { lists.push(options); return 'Add server…'; };
+    h.runner.getUIContext().input = async title => title === 'Add an MCP server · URL' ? `${web.origin}/mcp` : '';
+    await h.command('');
+    assert.deepEqual(lists[0], ['Add server…', 'Close']);
+    assert.deepEqual(JSON.parse(await readFile(h.path, 'utf8')), { mcpServers: { local: { url: `${web.origin}/mcp` } } });
+    assert.match(h.notices.at(-1) ?? '', /^Connected/);
+  } finally { await h.cleanup(); await web.close(); }
 });
