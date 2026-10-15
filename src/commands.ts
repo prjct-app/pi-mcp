@@ -119,7 +119,7 @@ export function installCommand(pi: ExtensionAPI, operations: Operations): void {
   function handOff(ctx: ExtensionContext, url: URL): void {
     pi.sendUserMessage(`Set up the MCP server documented at ${url.href}. Read that page and follow its links to the setup details. `
       + 'When a choice depends on me (which setup, which account, where a token lives), ask me before adding it. '
-      + `Then add it with the mcp tool. ${ADD_GUIDE}`,
+      + `Then add it with tools.mcp from a codemode script. ${ADD_GUIDE}`,
     ctx.isIdle() ? undefined : { deliverAs: 'followUp' });
     ctx.ui.notify(`${url.host} is a web page, not an MCP endpoint. The agent will read it, ask you what only you can decide, and show you the entry before saving.`, 'info');
   }
