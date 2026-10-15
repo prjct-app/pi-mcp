@@ -156,19 +156,20 @@ The loopback receiver exists only during authorization (max 5 minutes), bound to
 
 ## Agent tool
 
-A single proxy tool keeps the surface small:
+A single proxy tool keeps the surface small. It is reached only from codemode scripts: `mcp` has `codemode` exposure, so the model sees `codemode`, never a direct `mcp` tool. Naming `mcp` in `--tools` or `defaultTools` declares it directly again.
 
 ```js
-mcp({ action: "status" })
-mcp({ action: "tools", server: "jira", query: "search", limit: 5 })
-mcp({ action: "call", server: "jira", tool: "name", args: {} })
-mcp({ action: "resources", server: "local" })
-mcp({ action: "templates", server: "local" })
-mcp({ action: "read", server: "local", uri: "example://resource" })
-mcp({ action: "prompts", server: "local" })
-mcp({ action: "prompt", server: "local", prompt: "name", args: {} })
-mcp({ action: "complete", server: "local", uri: "example://docs/{topic}", argument: "topic", value: "auth" })
-mcp({ action: "add", server: "svelte", config: { url: "https://mcp.svelte.dev/mcp" }, uri: "https://svelte.dev/docs/ai/remote-setup" })  // sign-in is detected
+// inside a codemode script: tools.mcp(...)
+await tools.mcp({ action: "status" })
+await tools.mcp({ action: "tools", server: "jira", query: "search", limit: 5 })
+await tools.mcp({ action: "call", server: "jira", tool: "name", args: {} })
+await tools.mcp({ action: "resources", server: "local" })
+await tools.mcp({ action: "templates", server: "local" })
+await tools.mcp({ action: "read", server: "local", uri: "example://resource" })
+await tools.mcp({ action: "prompts", server: "local" })
+await tools.mcp({ action: "prompt", server: "local", prompt: "name", args: {} })
+await tools.mcp({ action: "complete", server: "local", uri: "example://docs/{topic}", argument: "topic", value: "auth" })
+await tools.mcp({ action: "add", server: "svelte", config: { url: "https://mcp.svelte.dev/mcp" }, uri: "https://svelte.dev/docs/ai/remote-setup" })  // sign-in is detected
 ```
 
 When credentials are missing, the tool returns `authorization_required` and places one clickable authorization link in the conversation. Do not open it, poll, or ask for callbacks. Wait for the `mcp-auth` message. MCP tool errors become Pi errors.

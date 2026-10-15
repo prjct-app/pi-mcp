@@ -22,6 +22,7 @@ test('discovery registers real schemas, annotations and structured results witho
   const host = await featureHost();
   try {
     assert.deepEqual([...host.tools.keys()], ['mcp']);
+    assert.equal(host.tools.get('mcp')!.exposure, 'codemode', 'the gateway is reached from codemode scripts only');
     assert.match(text(await host.tool({ action: 'status' })), /idle/);
     assert.deepEqual([...host.tools.keys()], ['mcp']);
     const listing = text(await host.tool(discover));
@@ -33,7 +34,7 @@ test('discovery registers real schemas, annotations and structured results witho
     assert.deepEqual('required' in echo.parameters ? echo.parameters.required : undefined, ['text']);
     assert.deepEqual(echo.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false });
     assert.ok(echo.outputSchema);
-    assert.deepEqual(host.session.getActiveToolNames(), ['mcp']);
+    assert.deepEqual(host.session.getActiveToolNames(), [], 'neither the gateway nor deferred native tools are declared to the model');
     const result = await host.native(native('echo'), { text: 'typed result' });
     assert.equal(result.isError, false);
     assert.match(text(result), /typed result/);
