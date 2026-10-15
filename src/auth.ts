@@ -1,8 +1,8 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { auth, ClientCredentialsProvider, resourceUrlFromServerUrl, checkResourceAllowed, type AuthProvider, type OAuthClientProvider, type OAuthDiscoveryState, type StoredOAuthClientInformation, type StoredOAuthTokens } from '@modelcontextprotocol/client';
 import { z } from 'zod';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { getAgentDir } from '@earendil-works/pi-coding-agent';
 import { withCredentialLock } from './store.ts';
 import { safeUrl, type ServerConfig } from './config.ts';
 
@@ -25,7 +25,7 @@ export interface SecretStore {
 
 /** Loaded only when OAuth is used. No plaintext fallback, migration, or adapter keychain access. */
 export class KeyringSecrets implements SecretStore {
-  constructor(private readonly lockRoot = join(getAgentDir(), 'mcp-locks')) {}
+  constructor(private readonly lockRoot = join(process.env.PRJCT_HOME ?? join(homedir(), '.prjct'), 'pi-mcp', 'locks')) {}
   withLock<T>(key: string, operation: () => Promise<T>, signal?: AbortSignal) { return withCredentialLock(this.lockRoot, key, operation, signal); }
   private async entry(key: string) {
     const { AsyncEntry } = await import('@napi-rs/keyring');

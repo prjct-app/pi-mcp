@@ -13,7 +13,7 @@ test('Pi public loader loads the package; ten tool calls return inline without l
   const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
   const oldXdg = process.env.XDG_CONFIG_HOME;
   const oldPath = process.env.PATH;
-  let stop: (() => Promise<void>) | undefined;
+  const shutdown: { stop?: () => Promise<void> } = {};
   try {
     const bin = join(dir, 'bin'); await mkdir(bin);
     const marker = join(dir, 'browser-launched');
@@ -27,7 +27,7 @@ test('Pi public loader loads the package; ten tool calls return inline without l
       command: process.execPath, args: ['--import', resolve('node_modules/tsx/dist/loader.mjs'), resolve('tests/fixtures/server.ts')],
     } } }));
     const host = await harness(dir, { mode: 'print', realPackage: true });
-    stop = () => host.emit('session_shutdown');
+    shutdown.stop = () => host.emit('session_shutdown');
     await host.emit('session_start');
     const tool = host.tools.get('mcp')!;
     const ctx = host.runner.createToolContext('test-call', undefined);
@@ -46,10 +46,10 @@ test('Pi public loader loads the package; ten tool calls return inline without l
     assert.match(JSON.stringify(completion.content), /protocols/);
     await assert.rejects(access(marker), { code: 'ENOENT' });
     assert.ok(host.commands.has('mcp'));
-    await stop();
+    await shutdown.stop!();
     await assert.rejects(tool.execute('closed', { action: 'call', server: 'local', tool: 'echo', args: { text: 'closed' } }, undefined, undefined, ctx), /closed/i);
   } finally {
-    await stop?.();
+    await shutdown.stop?.();
     if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
     if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = oldXdg;
     if (oldPath === undefined) delete process.env.PATH; else process.env.PATH = oldPath;

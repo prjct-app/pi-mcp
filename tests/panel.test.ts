@@ -24,12 +24,14 @@ function fixture() {
       if (action === 'auth') return { message: `Click to authorize ${name}: https://auth.example/x`, level: 'info', leave: true };
       return { message: 'ok', level: 'info' };
     },
+    add: async () => {},
   };
-  const spec = serverPanel(control, servers.map(server => ({ ...server })), outcome => notified.push(outcome));
+  const adds: string[] = [];
+  const spec = serverPanel(control, servers.map(server => ({ ...server })), outcome => notified.push(outcome), () => adds.push('add'));
   const panel = createPanel(spec, { terminal: { columns: 120, rows: 30 }, requestRender() {} } as any, theme, () => undefined);
   const screen = () => panel.render(120).map(line => stripVTControlCharacters(line)).join('\n');
   const press = async (...keys: string[]) => { for (const key of keys) { panel.handleInput!(key); await tick(); await tick(); } };
-  return { panel, screen, press, performed, notified };
+  return { panel, screen, press, performed, notified, adds };
 }
 
 test('the MCP panel lists servers with a credential fact and shows the selected one in detail', () => {
@@ -40,7 +42,7 @@ test('the MCP panel lists servers with a credential fact and shows the selected 
   assert.match(text, /○ github\s+key ✕/);
   assert.match(text, /auth\s+oauth: signed in/);
   assert.match(text, /endpoint\s+https:\/\/mcp\.linear\.app/);
-  assert.match(text, /c Connect · d Disconnect · a Re-authenticate · x Sign out/);
+  assert.match(text, /n Add server · c Connect · d Disconnect · a Re-authenticate · x Sign out/);
 });
 
 test('connecting records the tools and the history beside the server', async () => {
@@ -52,7 +54,7 @@ test('connecting records the tools and the history beside the server', async () 
   assert.match(text, /Tools \(2\)/);
   assert.match(text, /create_issue/);
   assert.match(text, /History[\s\S]*now {2}linear connected/);
-  assert.match(text, /t List tools · r Reconnect · d Disconnect/);
+  assert.match(text, /n Add server · t List tools · r Reconnect · d Disconnect/);
 });
 
 test('sign-out asks again, and an authorization link also lands in the transcript', async () => {
@@ -65,4 +67,12 @@ test('sign-out asks again, and an authorization link also lands in the transcrip
   await h.press('a');
   assert.equal(h.notified.length, 1);
   assert.match(h.notified[0]!.message, /https:\/\/auth\.example/);
+});
+
+test('n adds a server from any row: the panel closes and the add flow takes over', async () => {
+  const h = fixture();
+  assert.match(h.screen(), / n Add server · c Connect/);
+  await h.press('n');
+  assert.deepEqual(h.adds, ['add']);
+  assert.deepEqual(h.performed, []);
 });

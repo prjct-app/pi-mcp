@@ -2,15 +2,16 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import type { ServerConfig } from './config.ts';
 import type { LoginResult } from './login.ts';
 import { run, diagnostic, isLogin, type Services } from './services.ts';
-import { Operations } from './operations.ts';
+import { ADD_GUIDE, Operations } from './operations.ts';
 import { publishAuthorizationLink } from './auth-link.ts';
 import { ExposureSchema } from './schema.ts';
 import { toolExposure } from './settings.ts';
 import { plain } from './output.ts';
-import { brand, completer } from '@prjct.app/pi-tui-kit';
+import { brand, completer, openForm } from '@prjct.app/pi-tui-kit';
+import { suggestName } from './probe.ts';
 import { manageServers, describeAuth, type Action, type Outcome, type ServerControl, type ServerInfo } from './manage.ts';
 
-const HELP = '/mcp (interactive) | status | tools <server> | connect <server> | disconnect <server> | reconnect <server> | auth <server> | logout <server> | enable <server> | disable <server> | exposure <server>';
+const HELP = '/mcp (interactive) | status | add <url> | tools <server> | connect <server> | disconnect <server> | reconnect <server> | auth <server> | logout <server> | enable <server> | disable <server> | exposure <server>';
 const COMMANDS = ['status', 'tools', 'connect', 'disconnect', 'reconnect', 'auth', 'logout', 'enable', 'disable', 'exposure'] as const;
 const COMMAND_TOOL_LIMIT = 20;
 function loginNotice(name: string): string { return `Authorization link for ${plain(name)} is in the conversation.`; }
@@ -23,6 +24,23 @@ export function formatToolNotice(name: string, tools: readonly { name?: unknown 
   const unnamed = Math.max(0, tools.length - displayable.length);
   const details = [names.join('\n') || 'No displayable tool names.', omitted ? `… ${omitted} more; ask the agent to search by name.` : '', unnamed ? `… ${unnamed} unnamed tool${unnamed === 1 ? '' : 's'} hidden.` : ''].filter(Boolean).join('\n');
   return `${plain(name)} · ${tools.length} tool${tools.length === 1 ? '' : 's'} advertised\n${details}`;
+}
+
+const ADD_HELP = '/mcp add <url>: an MCP endpoint (https://mcp.svelte.dev/mcp) or the page that documents one (https://svelte.dev/docs/ai/mcp)';
+/** One line of input: a docked form in the terminal, Pi's portable dialog over RPC. Empty means the suggested value. */
+async function ask(ctx: ExtensionContext, title: string, label: string, hint: string, value = ''): Promise<string | undefined> {
+  if (ctx.mode === 'tui' && typeof ctx.ui.custom === 'function') {
+    const values = await openForm(ctx, { title, fields: [{ id: 'value', label, hint, value, required: !value }], submitLabel: 'continue' });
+    return values === undefined ? undefined : values.value?.trim() || value;
+  }
+  const typed = await ctx.ui.input(value ? `${title} · ${label} (Enter: ${value})` : `${title} · ${label}`, value || hint);
+  return typed === undefined ? undefined : typed.trim() || value;
+}
+
+function webUrl(value: string): URL | undefined {
+  if (!URL.canParse(value)) return undefined;
+  const url = new URL(value);
+  return url.protocol === 'https:' || url.protocol === 'http:' ? url : undefined;
 }
 
 export function installCommand(pi: ExtensionAPI, operations: Operations): void {
@@ -97,12 +115,60 @@ export function installCommand(pi: ExtensionAPI, operations: Operations): void {
     }
   }
 
+  /** The page goes to the active model; the person stays in the loop for anything only they can decide. */
+  function handOff(ctx: ExtensionContext, url: URL): void {
+    pi.sendUserMessage(`Set up the MCP server documented at ${url.href}. Read that page and follow its links to the setup details. `
+      + 'When a choice depends on me (which setup, which account, where a token lives), ask me before adding it. '
+      + `Then add it with tools.mcp from a codemode script. ${ADD_GUIDE}`,
+    ctx.isIdle() ? undefined : { deliverAs: 'followUp' });
+    ctx.ui.notify(`${url.host} is a web page, not an MCP endpoint. The agent will read it, ask you what only you can decide, and show you the entry before saving.`, 'info');
+  }
+
+  /** From the panel, the command or `/mcp add <url>`: ask for the URL when it was not given. */
+  async function addServer(ctx: ExtensionContext, given?: string): Promise<void> {
+    const typed = given ?? await ask(ctx, 'Add an MCP server', 'URL', 'An MCP endpoint (https://mcp.svelte.dev/mcp) or the page that documents one (https://svelte.dev/docs/ai/mcp).');
+    if (!typed) return;
+    const url = webUrl(typed);
+    if (!url) { ctx.ui.notify(ADD_HELP, 'info'); return; }
+    try { await addFromUrl(ctx, url); } catch (error) { ctx.ui.notify(diagnostic(error), 'error'); }
+  }
+
+  /** An endpoint needs no model: the protocol says whether it signs in with OAuth or a token. */
+  async function addFromUrl(ctx: ExtensionContext, url: URL): Promise<void> {
+    ctx.ui.notify(`Checking ${url.origin}…`, 'info');
+    const probe = await operations.probe(url).catch(() => undefined);
+    if (!probe) { ctx.ui.notify(`Could not reach ${url.origin}. Check the URL and your connection.`, 'warning'); return; }
+    if (probe.kind === 'page') { handOff(ctx, url); return; }
+    await operations.sessions.get(ctx);
+    const suggestion = suggestName(url, operations.sessions.names);
+    const typed = await ask(ctx, `Add ${url.host}`, 'Name', 'How this server is called in /mcp and in tool names.', suggestion);
+    if (typed === undefined) return;
+    const name = typed || suggestion;
+    const fallbackEnv = `${name.toUpperCase().replace(/[^A-Z0-9_]/g, '_')}_TOKEN`;
+    const env = probe.auth === 'bearer' ? await ask(ctx, `${url.host} needs a token`, 'Environment variable', 'The variable that holds the token when Pi starts. The token itself is never saved.', fallbackEnv) : '';
+    if (env === undefined) return;
+    const tokenEnv = env || fallbackEnv;
+    const config = probe.auth === 'oauth' ? { url: url.href, auth: 'oauth' }
+      : probe.auth === 'bearer' ? { url: url.href, auth: 'bearer', bearerTokenEnv: tokenEnv } : { url: url.href };
+    const saved = await operations.save(ctx, name, config, undefined);
+    switch (saved.status) {
+      case 'declined': ctx.ui.notify('Nothing was saved.', 'info'); return;
+      case 'authorization': ctx.ui.notify(linkOutcome(saved.name, saved.login).message, 'info'); return;
+      case 'connected': ctx.ui.notify(`Connected · saved in ${saved.path}\n${formatToolNotice(saved.name, saved.tools.map(tool => ({ name: tool })))}`, 'info'); return;
+      case 'saved_not_connected':
+        ctx.ui.notify(probe.auth === 'bearer' && !process.env[tokenEnv]
+          ? `Saved ${plain(saved.name)}. Set $${tokenEnv} where Pi starts, then restart Pi to connect it.`
+          : `Saved ${plain(saved.name)}, but connecting failed: ${saved.error}`, 'warning');
+    }
+  }
+
   pi.registerCommand('mcp', {
     description: brand('MCP servers: panel, status, connect, tools, sign-in'),
     getArgumentCompletions: completer(() => {
       const servers = (what: string) => () => operations.sessions.names.map(name => ({ value: name, description: `${what} ${name}` }));
       return [
         { value: 'status', description: 'every server, one line each' },
+        { value: 'add', description: 'set up a server from its endpoint or documentation URL' },
         { value: 'connect', description: 'connect a server', options: servers('connect') },
         { value: 'tools', description: 'list what a server advertises', options: servers('list tools of') },
         { value: 'reconnect', description: 'drop and reconnect a server', options: servers('reconnect') },
@@ -117,12 +183,18 @@ export function installCommand(pi: ExtensionAPI, operations: Operations): void {
     handler: async (args, ctx) => {
       if (!ctx.hasUI) throw new Error('Use the mcp tool in print/JSON mode. Manual OAuth requires interactive or RPC dialogs.');
       const [command, name, ...extra] = args.trim().split(/\s+/).filter(Boolean);
+      if (command === 'add') {
+        if (extra.length) { ctx.ui.notify(ADD_HELP, 'info'); return; }
+        await addServer(ctx, name);
+        return;
+      }
       if (extra.length || (command && command !== 'status' && !name) || (command && !(COMMANDS as readonly string[]).includes(command))) { ctx.ui.notify(HELP, 'info'); return; }
       try {
         const active = await operations.sessions.get(ctx);
         const control: ServerControl = {
           describe: () => describe(active),
           perform: (server, action) => perform(active, ctx, server, action).catch(error => ({ message: diagnostic(error), level: 'error' as const })),
+          add: () => addServer(ctx),
         };
         if (!command) { await manageServers(ctx, control); return; }
         if (command === 'status') {

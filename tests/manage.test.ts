@@ -143,8 +143,8 @@ test('/mcp completes actions, then server names, with the prjct mark', async () 
     assert.match(mcp.description, /^p · MCP servers/);
     const first = await mcp.getArgumentCompletions('');
     assert.ok(first?.[0]?.description);
-    assert.deepEqual(first.map((item: any) => item.value), ['status', 'connect', 'tools', 'reconnect', 'disconnect', 'auth', 'logout', 'enable', 'disable', 'exposure']);
-    assert.match(first[1]?.description ?? '', /^p · connect a server$/);
+    assert.deepEqual(first.map((item: any) => item.value), ['status', 'add', 'connect', 'tools', 'reconnect', 'disconnect', 'auth', 'logout', 'enable', 'disable', 'exposure']);
+    assert.match(first[2]?.description ?? '', /^p · connect a server$/);
     await host.emit('session_start');
     await new Promise(resolve => setTimeout(resolve, 50));
     const servers = await mcp.getArgumentCompletions('connect ');

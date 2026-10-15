@@ -1,19 +1,25 @@
-import type { AgentToolResult, AgentToolUpdateCallback, ExtensionAPI, ExtensionToolContext } from '@earendil-works/pi-coding-agent';
+import type { AgentToolResult, AgentToolUpdateCallback, ExtensionAPI, ExtensionContext, ExtensionToolContext } from '@earendil-works/pi-coding-agent';
+import { McpFailure } from './diagnostics.ts';
+import type { LoginResult } from './login.ts';
+import { probeUrl } from './probe.ts';
 import { StringEnum } from '@earendil-works/pi-ai';
 import { Type, type Static } from 'typebox';
 import { Check } from 'typebox/value';
 import { publishAuthorizationLink } from './auth-link.ts';
 import { Output } from './output.ts';
 import { NativeTools, nativeToolName } from './native-tools.ts';
-import { toolExposure } from './settings.ts';
+import { checkServer, toolExposure } from './settings.ts';
+import { dirname } from 'node:path';
+import { plain } from './output.ts';
 import { Sessions, run, diagnostic, isLogin, type McpOptions, type Services } from './services.ts';
 
-const ACTIONS = ['status', 'tools', 'call', 'resources', 'templates', 'read', 'prompts', 'prompt', 'complete'] as const;
+const ACTIONS = ['status', 'tools', 'call', 'resources', 'templates', 'read', 'prompts', 'prompt', 'complete', 'add'] as const;
 export const ProxyParameters = Type.Object({
   action: StringEnum(ACTIONS), server: Type.Optional(Type.String({ maxLength: 64 })), tool: Type.Optional(Type.String({ maxLength: 256 })),
   args: Type.Optional(Type.Record(Type.String(), Type.Unknown())), query: Type.Optional(Type.String({ maxLength: 256 })),
   uri: Type.Optional(Type.String({ maxLength: 4096 })), prompt: Type.Optional(Type.String({ maxLength: 256 })),
   argument: Type.Optional(Type.String({ maxLength: 256 })), value: Type.Optional(Type.String({ maxLength: 4096 })),
+  config: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
   limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50 })), offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 100000 })),
 }, { additionalProperties: false });
 
@@ -23,6 +29,17 @@ function strings(input: Record<string, unknown> = {}): Record<string, string> {
     return [key, value];
   }));
 }
+
+export type Saved = Readonly<
+  | { status: 'declined'; name: string }
+  | { status: 'connected'; name: string; path: string; tools: readonly string[] }
+  | { status: 'authorization'; name: string; path: string; login: LoginResult }
+  | { status: 'saved_not_connected'; name: string; path: string; error: string }>;
+
+/** Usage of action=add, sent only when it is used: the tool description stays the same size for every request. */
+export const ADD_GUIDE = 'action=add saves a new MCP server: server=<short name: letters, digits, - or _>, config=<its mcp.json entry; an endpoint URL alone, '
+  + '{"url": "..."}, is enough because sign-in is detected; secrets only as bearerTokenEnv or ${VAR}>, uri=<the documentation page, when you read one>. '
+  + 'A dialog shows the person the exact entry before it is saved and connected, so do not ask for approval first.';
 
 /** One execution/authentication/output pipeline for proxy and native tools. */
 export class Operations {
@@ -36,7 +53,7 @@ export class Operations {
     this.sessions = new Sessions(pi, this.native, options);
   }
 
-  private async resolve(active: Services, server: string, ctx: ExtensionToolContext, operation: () => Promise<unknown>, signal?: AbortSignal) {
+  private async resolve(active: Services, server: string, ctx: ExtensionContext, operation: () => Promise<unknown>, signal?: AbortSignal) {
     return active.modules.runtime.abortable(run(active, server, ctx, operation, signal), signal).catch(error => { throw new Error(diagnostic(error)); });
   }
 
@@ -76,6 +93,7 @@ export class Operations {
     const { runtime } = active;
     if (params.action === 'status') return this.output.result(runtime.status());
     const server = params.server;
+    if (params.action === 'add') return this.add(server, params.config, params.uri, signal, ctx);
     if (!server) throw new Error('Specify an MCP server from action=status');
     if (params.action === 'call') {
       if (!params.tool) throw new Error('Specify tool');
@@ -124,6 +142,61 @@ export class Operations {
       }
     };
     return this.finish(params.action, server, await this.resolve(active, server, ctx, operation, signal), signal);
+  }
+
+  /**
+   * Fill in what the endpoint itself reveals. An entry with only a URL is probed once:
+   * OAuth is enabled when the server publishes it; a page or a token request goes back
+   * to the caller, who must read the page or ask the person where the token lives.
+   */
+  probe(url: URL, signal?: AbortSignal) { return probeUrl(url, this.options.fetchFn, signal); }
+
+  async complete(name: string, config: Record<string, unknown>, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    checkServer(name, config, process.cwd()); // Offline checks first: nothing invalid reaches the network.
+    if (typeof config.url !== 'string' || config.auth || config.headers || !URL.canParse(config.url)) return config;
+    const probe = await this.probe(new URL(config.url), signal).catch(() => {
+      throw new McpFailure('configuration', `Could not reach ${new URL(config.url as string).origin}. Check the URL; nothing was saved.`);
+    });
+    if (probe.kind === 'page') throw new McpFailure('configuration', 'That URL is a web page, not an MCP endpoint. Read it and add the endpoint it documents; nothing was saved.');
+    if (probe.auth === 'bearer') throw new McpFailure('configuration', 'This endpoint needs a token. Ask the person which environment variable holds it, then add it with auth "bearer" and bearerTokenEnv; nothing was saved.');
+    return probe.auth === 'oauth' ? { ...config, auth: 'oauth' } : config;
+  }
+
+  /**
+   * Save a server and connect it. Documentation and endpoints are untrusted:
+   * the person sees the exact entry and confirms every save.
+   */
+  async save(ctx: ExtensionContext, name: string, config: Record<string, unknown>, source: string | undefined, signal?: AbortSignal): Promise<Saved> {
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(name)) throw new McpFailure('arguments', 'Server names use letters, digits, - or _ (at most 64).');
+    if (!ctx.hasUI) throw new McpFailure('configuration', 'Adding an MCP server needs the person to confirm it in an interactive session. Nothing was saved.');
+    const { path, replaces } = await this.sessions.target(ctx, name);
+    checkServer(name, config, dirname(path));
+    const entry = JSON.stringify(config, null, 2);
+    const runs = typeof config.command === 'string'
+      ? `\n\nThis starts a program on your machine with your permissions:\n${[config.command, ...Array.isArray(config.args) ? config.args : []].map(String).join(' ')}` : '';
+    const signIn = config.auth === 'oauth' ? '\n\nIt uses OAuth: you get a sign-in link after saving.' : '';
+    const from = source ? `\n\nFrom: ${source}` : '';
+    const approved = await ctx.ui.confirm(`${replaces ? 'Replace' : 'Add'} MCP server ${name}?`, plain(`${entry}${runs}${signIn}${from}\n\nSaved in ${path}`));
+    if (!approved) return { status: 'declined', name };
+    signal?.throwIfAborted();
+    const active = await this.sessions.add(ctx, path, name, config);
+    const discovered = await this.resolve(active, name, ctx, () => active.runtime.tools(name, signal), signal).catch((error: unknown) => error);
+    if (isLogin(discovered)) return { status: 'authorization', name, path, login: discovered };
+    if (discovered instanceof Error) return { status: 'saved_not_connected', name, path, error: discovered.message };
+    const tools = Array.isArray(discovered) ? discovered.map((tool: { name?: unknown }) => String(tool?.name)) : [];
+    return { status: 'connected', name, path, tools };
+  }
+
+  private async add(name: string | undefined, config: Record<string, unknown> | undefined, source: string | undefined, signal: AbortSignal | undefined, ctx: ExtensionToolContext): Promise<AgentToolResult> {
+    if (!name || !/^[a-zA-Z0-9_-]{1,64}$/.test(name) || !config) throw new Error(ADD_GUIDE);
+    const saved = await this.save(ctx, name, await this.complete(name, config, signal), source, signal);
+    switch (saved.status) {
+      case 'declined': return this.output.result({ status: 'declined', server: name, message: 'The person declined. Nothing was saved; ask what to change.' });
+      case 'authorization': return this.finish('add', name, saved.login, signal);
+      case 'saved_not_connected': return this.output.result({ status: saved.status, server: name, path: saved.path, error: saved.error,
+        message: 'Saved, but connecting failed. Fix the entry with action=add again (it replaces this one), or ask the person.' });
+      case 'connected': return this.output.result({ status: 'connected', server: name, path: saved.path, tools: saved.tools.length, names: saved.tools.slice(0, 20) });
+    }
   }
 
   async close(): Promise<void> { this.native.close(); await this.sessions.close(); await this.output.close(); }

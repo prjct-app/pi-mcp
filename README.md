@@ -96,7 +96,7 @@ Requires an exact HTTPS issuer. No redirect URIs or client metadata docs. The se
 {
   "mcpServers": {
     "notion": { "url": "https://mcp.notion.com/mcp", "auth": "oauth" },
-    "stripe": { "url": "https://mcp.stripe.com", "auth": "bearer", "bearerTokenEnv": "STRIPE_API_KEY" },
+    "stripe": { "url": "https://mcp.stripe.com", "auth": "oauth" },
     "github": { "url": "https://api.githubcopilot.com/mcp/", "auth": "bearer", "bearerTokenEnv": "GITHUB_PERSONAL_ACCESS_TOKEN" },
     "supabase": { "url": "https://mcp.supabase.com/mcp", "auth": "oauth" },
     "mobbin": { "url": "https://api.mobbin.com/mcp", "auth": "oauth" }
@@ -106,6 +106,8 @@ Requires an exact HTTPS issuer. No redirect URIs or client metadata docs. The se
 
 Official references: [Notion MCP](https://developers.notion.com/guides/mcp/get-started-with-mcp), [Stripe MCP](https://docs.stripe.com/mcp), [GitHub remote MCP](https://github.com/github/github-mcp-server/blob/main/docs/remote-server.md), [Supabase MCP](https://supabase.com/docs/guides/getting-started/mcp), [Mobbin MCP](https://docs.mobbin.com/mcp/introduction).
 
+Stripe uses OAuth for interactive sign-in: run `/mcp auth stripe` and follow the authorization link. If you previously configured `bearerTokenEnv`, remove it when switching to `"auth": "oauth"`, then reload Pi before authenticating. For unattended clients, Stripe also supports an agent API key through `"auth": "bearer"` and `"bearerTokenEnv": "STRIPE_AGENT_API_KEY"`; that environment variable must be set before starting Pi.
+
 Supabase accepts `?project_ref=<ref>&read_only=true` on the URL to scope the server to one project and a read-only Postgres role; `features=database,docs` limits the tool groups. For CI, use `"auth": "bearer", "bearerTokenEnv": "SUPABASE_ACCESS_TOKEN"` with a personal access token instead of OAuth.
 
 ---
@@ -114,8 +116,9 @@ Supabase accepts `?project_ref=<ref>&read_only=true` on the URL to scope the ser
 
 | Command | Result |
 |---|---|
-| `/mcp` | Interactive manager: pick a server, see its connection and credential state, and act on it |
+| `/mcp` | Interactive manager: pick a server, see its connection and credential state, and act on it; `n` adds a server from its URL |
 | `/mcp status` | Connection and credential state per server (does not connect) |
+| `/mcp add <url>` | Set up a server from its MCP endpoint or its documentation page (see below) |
 | `/mcp tools <server>` | Compact list of up to 20 tools (connects on demand) |
 | `/mcp connect <server>` | Connect now and report the advertised tool count; undoes `disconnect` |
 | `/mcp disconnect <server>` | Close the connection and refuse new ones for this session |
@@ -124,6 +127,24 @@ Supabase accepts `?project_ref=<ref>&read_only=true` on the URL to scope the ser
 | `/mcp logout <server>` | Forget the server's saved OAuth credentials (asks for confirmation in the manager) |
 
 The manager shows only actions that fit the server's state: connect, list tools, reconnect, disconnect, authenticate or re-authenticate, show or cancel a pending authorization link, and sign out. Credential state is read locally (OS keyring or environment) and never triggers network calls. Signing out removes local credentials only; tokens are not revoked at the provider. It uses Pi's standard dialogs, so it works in the TUI and over RPC.
+
+## Add a server from a URL
+
+`/mcp add <url>` takes either kind of URL and walks you through the rest. `/mcp add` alone, or `n` in the `/mcp` panel, asks for the URL.
+
+- **MCP endpoint**, for example `https://mcp.svelte.dev/mcp`. pi-mcp sends one MCP `initialize` request, with no credentials and no redirects followed, and reads how the server signs in. A JSON-RPC reply means no sign-in. A 401 with protected-resource metadata means OAuth, and you get the usual authorization link after saving. A 401 without it means a token: you are asked for the **name of the environment variable** that holds it, never the token itself. Then you pick a name (suggested from the host, `svelte` here). No model is involved.
+- **Documentation page**, for example `https://svelte.dev/docs/ai/mcp`. The page goes to the agent as a visible message. The agent reads the page, follows its links to the setup details, asks you whatever only you can decide (which setup, which account, where a token lives), and writes the entry with `mcp({ action: "add", ... })`.
+
+The `mcp` tool description only lists `add` among its actions; how to use it travels in the `/mcp add` message and in the reply to an incomplete `add` call, so requests that never add a server carry no extra instructions.
+
+You can also just ask in the chat ("connect https://mcp.svelte.dev/mcp"). An entry with only a `url` is checked the same way, so the agent does not need to know how the server signs in.
+
+Before anything is saved, a dialog shows you the exact entry, the program it would start (for stdio servers) and the page it came from. Endpoints and documentation are untrusted, so there is no way to skip this step. Without an interactive session (print or JSON mode), nothing can be added.
+
+- The entry goes to `~/.pi/agent/mcp.json`. A name defined in another configuration file is never touched. An existing name in that file is replaced only after a "Replace" confirmation.
+- The entry is checked exactly as loading checks it, before any network request. The error names unsupported fields (documentation snippets often include `"type": "http"`) and missing environment variables, so the agent can correct the entry before you are asked. A saved entry that referenced a missing variable would stop every server from loading.
+- Secrets are never written to the file. Use `bearerTokenEnv` or `${VAR}` references.
+- After saving, the session reloads (other servers reconnect on their next use), the server connects, and its tools are listed. If the connection fails, the entry stays saved and the reason is shown, so it can be replaced.
 
 ## OAuth flow
 
@@ -135,18 +156,20 @@ The loopback receiver exists only during authorization (max 5 minutes), bound to
 
 ## Agent tool
 
-A single proxy tool keeps the surface small:
+A single proxy tool keeps the surface small. It is reached only from codemode scripts: `mcp` has `codemode` exposure, so the model sees `codemode`, never a direct `mcp` tool. Naming `mcp` in `--tools` or `defaultTools` declares it directly again.
 
 ```js
-mcp({ action: "status" })
-mcp({ action: "tools", server: "jira", query: "search", limit: 5 })
-mcp({ action: "call", server: "jira", tool: "name", args: {} })
-mcp({ action: "resources", server: "local" })
-mcp({ action: "templates", server: "local" })
-mcp({ action: "read", server: "local", uri: "example://resource" })
-mcp({ action: "prompts", server: "local" })
-mcp({ action: "prompt", server: "local", prompt: "name", args: {} })
-mcp({ action: "complete", server: "local", uri: "example://docs/{topic}", argument: "topic", value: "auth" })
+// inside a codemode script: tools.mcp(...)
+await tools.mcp({ action: "status" })
+await tools.mcp({ action: "tools", server: "jira", query: "search", limit: 5 })
+await tools.mcp({ action: "call", server: "jira", tool: "name", args: {} })
+await tools.mcp({ action: "resources", server: "local" })
+await tools.mcp({ action: "templates", server: "local" })
+await tools.mcp({ action: "read", server: "local", uri: "example://resource" })
+await tools.mcp({ action: "prompts", server: "local" })
+await tools.mcp({ action: "prompt", server: "local", prompt: "name", args: {} })
+await tools.mcp({ action: "complete", server: "local", uri: "example://docs/{topic}", argument: "topic", value: "auth" })
+await tools.mcp({ action: "add", server: "svelte", config: { url: "https://mcp.svelte.dev/mcp" }, uri: "https://svelte.dev/docs/ai/remote-setup" })  // sign-in is detected
 ```
 
 When credentials are missing, the tool returns `authorization_required` and places one clickable authorization link in the conversation. Do not open it, poll, or ask for callbacks. Wait for the `mcp-auth` message. MCP tool errors become Pi errors.

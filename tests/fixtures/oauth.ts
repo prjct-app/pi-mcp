@@ -16,7 +16,7 @@ export class MemorySecrets implements SecretStore {
 
 export function oauthFixture(options: { authorizationEndpoint?: string } = {}) {
   const requests: string[] = [];
-  let refreshes = 0;
+  const refreshes = { value: 0 };
   const fetchFn: typeof fetch = async (input, init) => {
     const url = String(input);
     requests.push(url);
@@ -33,7 +33,7 @@ export function oauthFixture(options: { authorizationEndpoint?: string } = {}) {
       const params = new URLSearchParams(String(init?.body));
       assert.equal(params.get('resource'), 'https://mcp.example.test/mcp');
       if (params.get('grant_type') === 'refresh_token') {
-        refreshes++;
+        refreshes.value++;
         await new Promise(resolve => setTimeout(resolve, 20));
         return json({ access_token: 'refreshed-fixture-token', token_type: 'Bearer', expires_in: 3600 });
       }
@@ -42,5 +42,5 @@ export function oauthFixture(options: { authorizationEndpoint?: string } = {}) {
     }
     throw new Error(`Unexpected offline OAuth request: ${url}`);
   };
-  return { fetchFn, requests, refreshes: () => refreshes };
+  return { fetchFn, requests, refreshes: () => refreshes.value };
 }

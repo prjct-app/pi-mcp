@@ -1,3 +1,25 @@
+## [0.4.0](https://github.com/prjct-app/pi-mcp/compare/v0.3.1...v0.4.0) (2026-10-14)
+
+### Features
+
+* add servers from the /mcp panel ([51f636c](https://github.com/prjct-app/pi-mcp/commit/51f636c6485f5393347e435ab504af27142495df))
+
+## [0.3.1](https://github.com/prjct-app/pi-mcp/compare/v0.3.0...v0.3.1) (2026-10-14)
+
+## 0.3.0 (2026-10-13)
+
+- `/mcp add <url>` sets up a server from its MCP endpoint or its documentation page. An endpoint is checked directly (no sign-in, OAuth, or a token from an environment variable) and you only pick a name. A page goes to the agent, which reads it and asks you what only you can decide.
+- `mcp({ action: "add" })` adds an entry, with sign-in detected for a bare URL. You always confirm the exact entry before it is saved to `~/.pi/agent/mcp.json`. The session then reloads, connects the server and lists its tools.
+
+## 0.2.2 (2026-10-12)
+
+- OAuth locks live in `${PRJCT_HOME:-~/.prjct}/pi-mcp/locks`, outside Pi's folder. They are short-lived, so nothing is migrated.
+- Tests run with temporary Pi and prjct folders.
+
+## 0.2.1 (2026-10-09)
+
+- Keep MCP usage guidance in the `mcp` tool description instead of the system prompt.
+
 ## 0.2.0 (2026-10-06)
 
 - Remove classifier screening and its credential lookup.
@@ -25,7 +47,7 @@
 
 # Changelog
 
-## Unreleased
+## 0.3.0 (2026-10-13)
 
 - Screen `call`, `read` and `prompt` results with Jev when a TypeSafe key is found: text that instructs the agent (p ≥ 0.7) arrives whole under a banner that marks it as third-party data, and the transcript row says so. Nothing is blocked; no key, a timeout or an error leaves the result unchanged. Adapted from Level 6 of disler/ten-levels-of-jev (MIT).
 - Document Supabase and Mobbin remote MCP servers (OAuth) in the README examples.

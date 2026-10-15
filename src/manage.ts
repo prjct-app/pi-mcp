@@ -19,6 +19,8 @@ export type Outcome = Readonly<{ message: string; level: 'info' | 'warning' | 'e
 export interface ServerControl {
   describe(): Promise<ServerInfo[]>;
   perform(name: string, action: Action): Promise<Outcome>;
+  /** Ask for a URL and walk the person through adding that server. */
+  add(): Promise<void>;
 }
 
 const STATES: Record<string, [string, string]> = {
@@ -72,6 +74,7 @@ export function actionLabel(action: Action, info: ServerInfo): string {
 }
 
 const CLOSE = 'Close';
+const ADD = 'Add server…';
 const BACK = '← Back';
 
 const TONES: Record<string, [string, Tone]> = {
@@ -96,7 +99,7 @@ const KEYS: Record<Action, string> = { connect: 'c', tools: 't', reconnect: 'r',
  * @internal The /mcp panel: servers on the left; state, credentials, endpoint,
  * advertised tools and this session's history of actions on the right.
  */
-export function serverPanel(control: ServerControl, initial: ServerInfo[], notify: (outcome: Outcome) => void): PanelSpec & { reload(): Promise<void> } {
+export function serverPanel(control: ServerControl, initial: ServerInfo[], notify: (outcome: Outcome) => void, requestAdd: () => void = () => {}): PanelSpec & { reload(): Promise<void> } {
   const state = { servers: initial, tools: new Map<string, readonly string[]>(), traces: new Map<string, Trace[]>() };
   const changed = new Set<() => void>();
   const info = (item: PanelItem | undefined) => state.servers.find(server => server.name === item?.id);
@@ -157,8 +160,9 @@ export function serverPanel(control: ServerControl, initial: ServerInfo[], notif
         ],
       };
     },
-    actions,
-    empty: 'No MCP servers configured. Add them to ~/.pi/agent/mcp.json.',
+    // First in the footer, so it never truncates away. Adding asks for a URL, a name and a confirmation: it runs after the panel closes.
+    actions: [{ key: 'n', label: 'Add server', bulk: true, when: () => true, run: (_item, panel) => { requestAdd(); panel.close(); } }, ...actions],
+    empty: 'No MCP servers configured. Press n to add one from its URL.',
     subscribe: listener => { changed.add(listener); const timer = setInterval(() => { void reload().catch(() => undefined); }, 3000); timer.unref?.(); return () => { changed.delete(listener); clearInterval(timer); }; },
     reload,
   };
@@ -167,8 +171,10 @@ export function serverPanel(control: ServerControl, initial: ServerInfo[], notif
 /** The docked panel in the terminal; Pi's portable dialogs in RPC mode. */
 export async function manageServers(ctx: ExtensionContext, control: ServerControl): Promise<void> {
   if (ctx.mode === 'tui' && typeof ctx.ui.custom === 'function') {
-    const spec = serverPanel(control, await control.describe(), outcome => ctx.ui.notify(outcome.message, outcome.level));
+    const next = { add: false };
+    const spec = serverPanel(control, await control.describe(), outcome => ctx.ui.notify(outcome.message, outcome.level), () => { next.add = true; });
     await openPanel(ctx, spec);
+    if (next.add) await control.add();
     return;
   }
   return manageDialogs(ctx, control);
@@ -176,9 +182,9 @@ export async function manageServers(ctx: ExtensionContext, control: ServerContro
 
 async function manageDialogs(ctx: ExtensionContext, control: ServerControl): Promise<void> {
   const servers = await control.describe();
-  if (!servers.length) { ctx.ui.notify('No MCP servers configured. Add them to mcp.json.', 'info'); return; }
   const lines = servers.map(formatServerLine);
-  const picked = await ctx.ui.select(`MCP servers (${servers.length})`, [...lines, CLOSE]);
+  const picked = await ctx.ui.select(`MCP servers (${servers.length})`, [...lines, ADD, CLOSE]);
+  if (picked === ADD) { await control.add(); return; }
   const index = picked === undefined ? -1 : lines.indexOf(picked);
   if (index < 0) return;
   const leave = await manageServer(ctx, control, servers[index]!.name);

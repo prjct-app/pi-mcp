@@ -93,8 +93,6 @@ jobs:
         if: steps.current.outputs.publish == 'true' && steps.published.outputs.exists != 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Temporary authorized fallback; remove the repository secret after release.
-          NPM_TOKEN: ${{ secrets.PI_NPM_TEMP_RELEASE_20261002 }}
           DRY_RUN: ${{ inputs.dry_run || false }}
         run: |
           args=()
