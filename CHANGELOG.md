@@ -1,3 +1,9 @@
+## [0.4.1](https://github.com/prjct-app/pi-mcp/compare/v0.4.0...v0.4.1) (2026-10-15)
+
+### Bug Fixes
+
+* reach the mcp gateway only through codemode ([1b04619](https://github.com/prjct-app/pi-mcp/commit/1b04619392d188124f6543505f6510c3f45da1c4))
+
 ## [0.4.0](https://github.com/prjct-app/pi-mcp/compare/v0.3.1...v0.4.0) (2026-10-14)
 
 ### Features
