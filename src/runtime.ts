@@ -14,8 +14,16 @@ type Connection = Readonly<{
   tools?: Promise<Tool[]>;
   reset?: Promise<void>;
   error?: Error;
+  /** When it failed, and whether a call may start a fresh connection instead of reporting the failure. */
+  failedAt?: number;
+  retry?: boolean;
   revision: number;
 }>;
+
+/** A failed attempt is not retried by another call inside this window; a dropped live connection is retried at once. */
+const RETRY_AFTER_MS = 5000;
+/** stdio servers started with npx can spend a long time downloading before they answer. */
+const STDIO_CONNECT_TIMEOUT_MS = 60000;
 
 type Observer = Readonly<{
   tools?: (name: string, tools: readonly Tool[], config: ServerConfig) => void;
@@ -36,6 +44,10 @@ export function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise
 /** The user disconnected this server; the message is safe to show and tells how to undo it. */
 export class ServerOffline extends Error {
   constructor(name: string) { super(`MCP server ${name} was disconnected by the user for this session. Ask the user before using it; /mcp connect ${name} restores it.`); }
+}
+
+function field(error: unknown, key: string): unknown {
+  return error && typeof error === 'object' && key in error ? Reflect.get(error, key) : undefined;
 }
 
 export class McpRuntime {
@@ -86,8 +98,14 @@ export class McpRuntime {
     const config = this.config(name);
     if (this.offline.has(name)) throw new ServerOffline(name);
     const existing = this.connections.get(name);
-    if (existing?.state === 'failed' || existing?.state === 'resetting') throw existing.error ?? new McpFailure('transport', `MCP server ${name} is unavailable. Use /mcp reconnect ${name}.`);
-    if (existing) return abortable(existing.ready, signal);
+    if (existing?.state === 'resetting') throw existing.error ?? new McpFailure('transport', `MCP server ${name} is unavailable. Use /mcp reconnect ${name}.`);
+    if (existing?.state === 'failed') {
+      if (!existing.retry || Date.now() - (existing.failedAt ?? 0) < RETRY_AFTER_MS) throw existing.error ?? new McpFailure('transport', `MCP server ${name} is unavailable. Use /mcp reconnect ${name}.`);
+      // Replace it synchronously so concurrent callers share one new connection.
+      this.connections.delete(name);
+      this.observer.withdraw?.(name);
+      void existing.client.close().catch(() => {});
+    } else if (existing) return abortable(existing.ready, signal);
     const mode = config.protocolVersion === '2026-07-28' ? { pin: '2026-07-28' as const } : config.protocolVersion ?? 'auto';
     const client = new Client({ name: 'pi-mcp', version: '0.1.0' }, {
       capabilities: {}, // No MCP Apps, URL elicitation, sampling, or roots.
@@ -118,16 +136,19 @@ export class McpRuntime {
     client.onclose = () => {
       if (this.connections.get(name)?.client !== client) return;
       this.observer.withdraw?.(name);
-      this.update(name, client, { state: 'failed' });
+      const dropped = this.connections.get(name)?.state === 'connected';
+      this.update(name, client, { state: 'failed', failedAt: dropped ? 0 : Date.now(), retry: dropped });
     };
     client.onerror = () => {}; // Request errors propagate. Never send arbitrary stderr to Pi's terminal.
-    const ready = client.connect(transport, { signal: this.shutdown.signal, timeout: config.requestTimeoutMs ?? 15000 }).then(() => {
+    const ready = client.connect(transport, { signal: this.shutdown.signal, timeout: config.requestTimeoutMs ?? (config.url ? 15000 : STDIO_CONNECT_TIMEOUT_MS) }).then(() => {
       this.shutdown.signal.throwIfAborted();
       this.update(name, client, { state: 'connected' });
       return client;
     }).catch(async error => {
       const failure = new McpFailure('transport', stderrReason(stderr.tail) ?? safeDiagnostic(error));
-      this.update(name, client, { state: 'failed', error: failure });
+      const code = field(error, 'code');
+      const retry = code !== 'HTTP_AUTH_REQUIRED' && code !== 'HTTP_ACCESS_DENIED' && code !== 'ENOENT' && code !== 'EACCES' && !this.shutdown.signal.aborted;
+      this.update(name, client, { state: 'failed', error: failure, failedAt: Date.now(), retry });
       await client.close().catch(() => {});
       throw failure;
     });
