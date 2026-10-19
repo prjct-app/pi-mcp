@@ -1,3 +1,9 @@
+## [0.4.2](https://github.com/prjct-app/pi-mcp/compare/v0.4.1...v0.4.2) (2026-10-19)
+
+### Bug Fixes
+
+* reconnect a dropped MCP connection on the next call ([7051a7e](https://github.com/prjct-app/pi-mcp/commit/7051a7ef2f59a4e5cb2115313153456a70cfae1a))
+
 ## [0.4.1](https://github.com/prjct-app/pi-mcp/compare/v0.4.0...v0.4.1) (2026-10-15)
 
 ### Bug Fixes
