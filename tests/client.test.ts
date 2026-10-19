@@ -83,3 +83,17 @@ test('a pinned modern client rejects a legacy-only server rather than silently d
   try { await assert.rejects(runtime.tools('local'), /negotiation|protocol|modern/i); }
   finally { await runtime.close(); }
 });
+
+test('a dropped live connection is replaced by the next call without /mcp reconnect', async () => {
+  const runtime = new McpRuntime({ local: localServer });
+  try {
+    const first = JSON.parse(((await runtime.call('local', 'echo', { text: 'a' })).content[0] as { text: string }).text);
+    process.kill(first.pid, 'SIGKILL');
+    for (let i = 0; i < 50 && runtime.status()[0]?.state === 'connected'; i++) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(runtime.status()[0]?.state, 'failed');
+    const second = JSON.parse(((await runtime.call('local', 'echo', { text: 'b' })).content[0] as { text: string }).text);
+    assert.equal(second.text, 'b');
+    assert.notEqual(second.pid, first.pid);
+    assert.equal(runtime.status()[0]?.state, 'connected');
+  } finally { await runtime.close(); }
+});
