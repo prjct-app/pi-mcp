@@ -5,7 +5,7 @@
 - **Local name**: `@prjct.app/pi-mcp` · **Version**: `0.1.0` · **Private**: yes
 - **Repo**: [prjct-app/pi-mcp](https://github.com/prjct-app/pi-mcp) · **Integration branch**: `develop`
 - **Pi API**: `@earendil-works/pi-coding-agent@0.99.1` · **MCP SDK**: `@modelcontextprotocol/client@2.0.0`
-- **Node**: ≥ 22.19 (verified macOS 22.22.2)
+- **Node**: ≥ 22.23.4
 - **Runtime dependencies**: MCP client, Zod, native keyring. No browsers or MCP Apps.
 
 ---
