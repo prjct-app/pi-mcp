@@ -22,7 +22,9 @@ Never run `npm publish` by hand; `prepublishOnly` refuses outside GitHub Actions
 
 ## Checks and versioning
 
-The Check workflow validates PRs and pushes to `develop`/`main`. Release PR policy
+The Check workflow validates PRs and pushes to `develop`/`main`. Its dependency audit includes development dependencies so vulnerable protocol fixtures or host-test dependencies cannot silently pass. The root manifest constrains Zod to `^4.6.6`, the test MCP server to `2.3.1`, Hono to `^4.13.11` and Undici to `8.12.2`. The Hono/Undici overrides keep the tested Pi peer versions unchanged; update these floors deliberately when their upstream pins are patched. Root-package overrides protect this repository's install, not the host Pi installation's dependency tree.
+
+Native credential checks run in a Linux/macOS/Windows hosted-runner matrix with a ten-minute job limit. Linux also executes the explicit old-binding fallback reproduction against its private test vault. Configuring the matrix is not evidence that the remote OS jobs have run; require their results before releasing. Release PR policy
 rejects a main-targeting branch other than the repository's `develop` branch.
 Release dependencies are locked separately in `.github/release/` and excluded
 from the extension package. They are not part of runtime installation.

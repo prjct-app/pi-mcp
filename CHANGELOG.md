@@ -1,3 +1,25 @@
+## Unreleased
+
+### Bug Fixes
+
+- Remove all five inherited dependency-audit findings by raising Zod to its patched security floor, aligning the test MCP server with SDK 2.3.1, and constraining Hono and Undici to patched versions. Audit the complete dependency tree in CI rather than omitting development dependencies.
+- Run the legacy Linux keyring-loss reproduction in CI and bound the native platform jobs to ten minutes. Keep the old binding as an explicit development-only fixture instead of shipping an unused vault dependency and its legacy native binding.
+- Fix Linux OAuth persistence by requiring durable Secret Service instead of silently switching to the volatile kernel keyring when D-Bus is unavailable. Upgrade the native keyring binding to 2.1.2 so storage errors cannot masquerade as absent credentials or successful deletion; preserve existing persistent credential identities.
+- Verify sign-out removal independently and invalidate in-flight callbacks and pending starts so failed sign-out cannot resume using locally cached tokens.
+- Keep callback code exchanges single-use after endpoint rediscovery and bound token-response memory even for highly fragmented streams.
+- Secure Windows credential-lock directories with verified owner-only ACLs instead of unsupported POSIX permissions; reject unsafe existing directories. Use Windows PowerShell's .NET ACL APIs directly so inherited PowerShell 7 module paths cannot break validation.
+- Add isolated native-keyring CI checks on Linux, macOS and Windows for cross-process persistence, concurrent updates, legacy records and the full synthetic OAuth authorization/refresh flow, including Linux daemon restarts.
+- Preserve safe OAuth callback failure reasons in the browser and Pi notifications without exposing codes, tokens, issuer URLs, or provider descriptions.
+- Prevent SDK recovery from replaying a single-use authorization code or logging private provider descriptions during a failed exchange.
+- Verify issuer-bound credential records after secure-store writes before issuing authorization links or accepting tokens, and report missing saved client registrations explicitly.
+- Resolve runtime external export subpaths to their package roots in compiled local builds and remove the unused privacy-package link.
+
+## [0.4.2](https://github.com/prjct-app/pi-mcp/compare/v0.4.1...v0.4.2) (2026-10-19)
+
+### Bug Fixes
+
+* reconnect a dropped MCP connection on the next call ([7051a7e](https://github.com/prjct-app/pi-mcp/commit/7051a7ef2f59a4e5cb2115313153456a70cfae1a))
+
 ## [0.4.1](https://github.com/prjct-app/pi-mcp/compare/v0.4.0...v0.4.1) (2026-10-15)
 
 ### Bug Fixes

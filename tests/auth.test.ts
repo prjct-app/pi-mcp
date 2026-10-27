@@ -137,3 +137,183 @@ test('a pre-registered OAuth client is never reused with an unexpected issuer', 
     assert.ok(!fixture.requests.some(url => url.endsWith('/register') || url.endsWith('/token')));
   } finally { manager.close(); }
 });
+
+function callbackFor(link: string): URL {
+  const authorize = new URL(link);
+  const callback = new URL(authorize.searchParams.get('redirect_uri')!);
+  callback.searchParams.set('state', authorize.searchParams.get('state')!);
+  callback.searchParams.set('code', 'fixture-code');
+  return callback;
+}
+
+for (const code of ['invalid_grant', 'invalid_client', 'unauthorized_client']) {
+  test(`a failed code exchange is not replayed by SDK auth recovery: ${code}`, async () => {
+    const fixture = oauthFixture({ tokenError: code });
+    const manager = new OAuthManager(servers, new MemorySecrets(), fixture.fetchFn);
+    try {
+      const callback = callbackFor((await manager.start('remote')).url!);
+      await assert.rejects(manager.finish('remote', callback.href), error => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, new RegExp(code));
+        assert.doesNotMatch(error.message, /private-provider|fixture-code|fixture-token/);
+        return true;
+      });
+      assert.equal(fixture.requests.filter(url => url.endsWith('/token')).length, 1);
+      await assert.rejects(manager.finish('remote', callback.href), /expired/);
+      assert.equal(fixture.requests.filter(url => url.endsWith('/token')).length, 1);
+    } finally { manager.close(); }
+  });
+}
+
+for (const corruptWrite of [false, true]) {
+  test(`registration writes must be independently verified before issuing an authorization link (corrupt=${corruptWrite})`, async () => {
+    const fixture = oauthFixture();
+    const memory = new MemorySecrets();
+    const manager = new OAuthManager(servers, {
+      withLock: (key, action) => memory.withLock(key, action),
+      get: key => memory.get(key),
+      set: async (key, value) => { if (corruptWrite) await memory.set(key, value + 'private-corruption'); },
+      delete: key => memory.delete(key),
+    }, fixture.fetchFn);
+    try {
+      await assert.rejects(manager.start('remote'), error => {
+        assert.ok(error instanceof Error);
+        assert.match(error.message, /Cannot save secure MCP credentials/);
+        assert.doesNotMatch(error.message, /private-corruption/);
+        return true;
+      });
+      assert.equal(fixture.requests.filter(url => url.endsWith('/register')).length, 1);
+      assert.equal(fixture.requests.filter(url => url.endsWith('/token')).length, 0);
+      await assert.rejects(manager.provider('remote').token(), /authorization required/);
+    } finally { manager.close(); }
+  });
+}
+
+test('a registration removed after approval is diagnosed without redeeming the code or generating a new link', async () => {
+  const fixture = oauthFixture();
+  const memory = new MemorySecrets();
+  const manager = new OAuthManager(servers, memory, fixture.fetchFn);
+  try {
+    const callback = callbackFor((await manager.start('remote')).url!);
+    memory.data.clear();
+    await assert.rejects(manager.finish('remote', callback.href), /Saved OAuth client registration is missing/);
+    assert.equal(fixture.requests.filter(url => url.endsWith('/token')).length, 0);
+    assert.equal(fixture.requests.filter(url => url.endsWith('/register')).length, 1);
+  } finally { manager.close(); }
+});
+
+test('a silent token-storage failure is not reported as authorized and never replays the code', async () => {
+  const fixture = oauthFixture();
+  const memory = new MemorySecrets();
+  const manager = new OAuthManager(servers, {
+    withLock: (key, action) => memory.withLock(key, action),
+    get: key => memory.get(key),
+    set: async (key, value) => { if (!JSON.parse(value).activeIssuer) await memory.set(key, value); },
+    delete: key => memory.delete(key),
+  }, fixture.fetchFn);
+  try {
+    const callback = callbackFor((await manager.start('remote')).url!);
+    await assert.rejects(manager.finish('remote', callback.href), /Cannot save secure MCP credentials/);
+    assert.equal(fixture.requests.filter(url => url.endsWith('/token')).length, 1);
+    assert.equal(await manager.status('remote'), 'reauthorize');
+    await assert.rejects(manager.provider('remote').token(), /authorization required/);
+  } finally { manager.close(); }
+});
+
+test('advertised issuer response support is still enforced before code redemption', async () => {
+  const fixture = oauthFixture({ issRequired: true });
+  const manager = new OAuthManager(servers, new MemorySecrets(), fixture.fetchFn);
+  try {
+    const callback = callbackFor((await manager.start('remote')).url!);
+    await assert.rejects(manager.finish('remote', callback.href), /issuer/);
+    assert.equal(fixture.requests.filter(url => url.endsWith('/token')).length, 0);
+    const matching = callbackFor((await manager.start('remote')).url!);
+    matching.searchParams.set('iss', 'https://auth.example.test');
+    await manager.finish('remote', matching.href);
+    assert.equal(fixture.requests.filter(url => url.endsWith('/token')).length, 1);
+  } finally { manager.close(); }
+});
+
+test('a failed secure-store logout never reports removal or continues using cached tokens locally', async () => {
+  const fixture = oauthFixture();
+  const memory = new MemorySecrets();
+  const manager = new OAuthManager(servers, {
+    withLock: (key, action) => memory.withLock(key, action),
+    get: key => memory.get(key), set: (key, value) => memory.set(key, value),
+    delete: async () => { throw new Error('private native deletion failure'); },
+  }, fixture.fetchFn);
+  try {
+    await manager.finish('remote', callbackFor((await manager.start('remote')).url!).href);
+    assert.equal(await manager.provider('remote').token(), 'refreshed-fixture-token');
+    await assert.rejects(manager.logout('remote'), error => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Cannot remove secure MCP credentials/);
+      assert.doesNotMatch(error.message, /private native/);
+      return true;
+    });
+    assert.equal(memory.data.size, 1);
+    assert.equal(await manager.status('remote'), 'reauthorize');
+    await assert.rejects(manager.provider('remote').token(), /authorization required/);
+  } finally { manager.close(); }
+});
+
+test('callback rediscovery cannot bypass code replay protection or expose provider descriptions', async () => {
+  const fixture = oauthFixture({ tokenEndpoint: 'https://auth.example.test/oauth/token', tokenError: 'invalid_grant' });
+  const phase = { callback: false };
+  const logs: unknown[][] = [];
+  const warn = console.warn;
+  console.warn = (...args: unknown[]) => { logs.push(args); };
+  const manager = new OAuthManager({ remote: { ...servers.remote, oauth: { clientId: 'pre-registered-fixture', issuer: 'https://auth.example.test' } } }, new MemorySecrets(), async (input, init) => {
+    if (!phase.callback && String(input).startsWith('https://auth.example.test/.well-known/')) return new Response('{}', { status: 404 });
+    return fixture.fetchFn(input, init);
+  });
+  try {
+    const callback = callbackFor((await manager.start('remote')).url!);
+    phase.callback = true;
+    await assert.rejects(manager.finish('remote', callback.href), /invalid_grant/);
+    assert.equal(fixture.requests.filter(url => url.endsWith('/oauth/token')).length, 1);
+    assert.deepEqual(logs, []);
+  } finally { manager.close(); console.warn = warn; }
+});
+
+test('logout invalidates a callback already exchanging a code even when native deletion then fails', async () => {
+  const fixture = oauthFixture();
+  const memory = new MemorySecrets();
+  const gate = { release: () => {}, entered: () => {} };
+  const responseReady = new Promise<void>(resolve => { gate.release = resolve; });
+  const requestEntered = new Promise<void>(resolve => { gate.entered = resolve; });
+  const manager = new OAuthManager(servers, {
+    withLock: (key, action) => memory.withLock(key, action),
+    get: key => memory.get(key), set: (key, value) => memory.set(key, value),
+    delete: async () => { throw new Error('private native deletion failure'); },
+  }, async (input, init) => {
+    if (String(input).endsWith('/token')) { gate.entered(); await responseReady; }
+    return fixture.fetchFn(input, init);
+  });
+  try {
+    const completion = manager.finish('remote', callbackFor((await manager.start('remote')).url!).href);
+    void completion.catch(() => {});
+    await requestEntered;
+    const logout = manager.logout('remote');
+    void logout.catch(() => {});
+    gate.release();
+    await assert.rejects(completion, /expired/);
+    await assert.rejects(logout, /Cannot remove secure MCP credentials/);
+    assert.equal(await manager.status('remote'), 'reauthorize');
+    await assert.rejects(manager.provider('remote').token(), /authorization required/);
+    assert.equal(fixture.requests.filter(url => url.endsWith('/token')).length, 1);
+  } finally { gate.release(); manager.close(); }
+});
+
+test('logout cancels an older authorization start before it acquires the credential lock', async () => {
+  const fixture = oauthFixture();
+  const manager = new OAuthManager(servers, new MemorySecrets(), fixture.fetchFn);
+  try {
+    const starting = manager.start('remote');
+    void starting.catch(() => {});
+    await manager.logout('remote');
+    await assert.rejects(starting, /expired/);
+    assert.equal(await manager.status('remote'), 'signed_out');
+    assert.deepEqual(fixture.requests, []);
+  } finally { manager.close(); }
+});
