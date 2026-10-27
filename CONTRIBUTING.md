@@ -16,4 +16,5 @@
 - Test at approved boundaries: MCP client vs local protocol fixtures, and Pi extension tool/command/lifecycle API.
 - Run `npm run check`, `npm test`, `npm run check:package` before review.
 - Build the compiled local copy Pi loads with `npm run build:pi`. It writes `~/.pi/agent/builds/<package>` outside the repository, because compiled code inside it would load the repository's development copy of Pi instead of the host's.
+- Building or updating a package changes files on disk, not the active Pi session. A compiled build must be selected as the package source; it does not replace an installed npm package automatically. After updating the selected package, run `/reload` or restart Pi and verify the loaded source/version before testing real authorization.
 - Never push, create or merge a PR, publish, or deploy without explicit user authorization.
