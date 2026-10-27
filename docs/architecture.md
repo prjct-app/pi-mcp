@@ -12,7 +12,8 @@ Follows `pi-team` conventions: minimal root entry, injectable `installMcp`, immu
 | `src/schema.ts` | Server configuration schema |
 | `src/config.ts` | Source precedence, project trust, safe URL and env handling |
 | `src/runtime.ts` | SDK client per server: shared setup, independent calls, teardown |
-| `src/auth.ts` | SDK OAuth, issuer-bound secure records, coordinated refresh |
+| `src/auth.ts` | SDK OAuth, verified issuer-bound secure records, coordinated refresh |
+| `src/auth-completion.ts` | Allowlisted callback diagnostics and single-use token exchange guard |
 | `src/login.ts` | Shared authorization links, transient loopback, completion notifications |
 | `src/store.ts` | Cross-process credential transaction lock (no secret payloads) |
 | `src/render.ts` | Compact TUI presentation (schemas stay in agent content) |
@@ -52,7 +53,11 @@ Optional client capabilities are empty. No support advertised for MCP Apps, samp
 - Transport receives only the SDK's narrow bearer-provider interface. Never an interactive OAuth provider.
 - Missing credentials detected before connecting → authorization link.
 - SDK handles discovery, PKCE S256, client registration, issuer checks, and code exchange.
-- **Secure records**: keyed by hash of server name + endpoint + OAuth settings. Namespace `app.prjct.pi-mcp`. Native OS keyring only, no plaintext fallback.
+- **Secure records**: keyed by hash of server name + endpoint + OAuth settings. Namespace `app.prjct.pi-mcp`. Native OS keyring only, no plaintext fallback. `@napi-rs/keyring` is pinned to 2.1.2; every Linux entry requires `secret-service`, never auto-selected kernel memory. Native missing values are normalized to `undefined`, but unavailable/locked/ambiguous reads and failed deletions are propagated. Every write is independently read back under the credential lock before issuing a link or accepting tokens; silent loss or changed content fails closed.
+- **Code exchange**: only one POST during callback completion, independently of earlier endpoint metadata so callback rediscovery cannot bypass the guard. Failed responses are classified before SDK recovery can log arbitrary provider descriptions or replay the single-use code. Response inspection uses one bounded 1 MiB buffer without a cloning tee or recursive per-fragment arrays; SDK token-schema, issuer, resource and PKCE checks still apply.
+- **Sign-out**: block local cached-token use immediately. An account generation invalidates callbacks and authorization starts that predate sign-out or cancellation, so they cannot undo the block. Report success only after native deletion and an independent read confirming absence; an inaccessible store is never treated as successful removal.
+- **Native validation**: `npm run test:keyring` uses a private D-Bus and temporary encrypted GNOME keyring on Linux, including daemon restarts. macOS/Windows native checks run only on ephemeral CI runners. The default test suite still blocks real native keyring imports. See [OAuth storage](oauth-storage.md).
+- **Failure reporting**: browser and Pi notifications share messages built from local constants, known OAuth codes and bounded HTTP statuses. A symbol-marked, allowlisted failure record survives Pi module reloads without trusting arbitrary error messages.
 - **Refreshes**: serialized (shared in-session promise, cross-process lock). Sessions that find a rotated token adopt it.
 - **Lock**: exclusive private file lock with PID/time. Locks never stolen by age.
 - **Callback receiver**: loopback only, validates method/Host/origin/path/state. Responds with plain text, no-store/no-referrer headers. Shared between flows in the same extension.
@@ -98,6 +103,6 @@ MCP Apps, sampling, roots, elicitation, tasks, deprecated SSE-only, direct-tool 
 
 - Tools/list calls in flight are coalesced. SDK owns response-cache TTLs, partitions, schemas, invalidation, pagination.
 - No deduplication of independent tool calls (identical arguments can be legitimate).
-- No host retry loop after ambiguous failures. SDK may retry a request rejected for authentication. No exactly-once guarantee.
+- No host retry loop after ambiguous failures. SDK may retry other requests rejected for authentication; the callback's single-use code exchange is never replayed. No exactly-once guarantee for independent MCP operations.
 - Failed connection setup latches until explicit reset.
 - `/mcp reconnect` closes the client and resets it to idle. Does not start authorization.

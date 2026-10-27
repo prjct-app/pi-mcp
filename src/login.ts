@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { OAuthManager } from './auth.ts';
+import { completionFailure } from './auth-completion.ts';
 
 export type LoginResult = {
   status: 'authorization_required' | 'authorization_failed';
@@ -47,7 +48,7 @@ class Callbacks {
           accept: async callback => {
             cleanup(); // Single use; unsolicited/wrong-state requests never reach this handler.
             try { await consume(callback.href); resolve(); }
-            catch { reject(new Error('OAuth authorization failed')); throw new Error('OAuth authorization failed'); }
+            catch (error) { const failure = completionFailure(error); reject(failure); throw failure; }
           },
         });
         signal.addEventListener('abort', abort, { once: true });
@@ -73,7 +74,7 @@ class Callbacks {
         }
         await callback.accept(target);
         res.writeHead(200).end('Authorized. You can close this tab and return to Pi.');
-      } catch { res.writeHead(400).end('Authorization could not be completed. Return to Pi.'); }
+      } catch (error) { res.writeHead(400).end(completionFailure(error).message + ' Return to Pi.'); }
     });
     server.requestTimeout = 10000;
     server.headersTimeout = 10000;
@@ -106,7 +107,7 @@ export class AuthLinks {
   constructor(
     private readonly auth: OAuthManager,
     private readonly reconnect: (name: string) => Promise<void>,
-    private readonly notify: (name: string, success: boolean, reason?: 'expired' | 'rejected') => void,
+    private readonly notify: (name: string, success: boolean, reason?: 'expired' | 'failed', detail?: string) => void,
     private readonly timeoutMs = 300000,
   ) {}
 
@@ -140,13 +141,14 @@ export class AuthLinks {
           await this.reconnect(name);
           this.pending.delete(name);
           if (!this.closed) this.notify(name, true);
-        }, () => {
+        }, (error: unknown) => {
           this.auth.cancel(name);
           if (this.closed || this.pending.get(name)?.controller !== controller) return; // Closed or cancelled by the user.
-          const reason = controller.signal.aborted ? 'expired' : 'rejected';
-          const result: LoginResult = { status: 'authorization_failed', server: name, message: `Authorization ${reason}. Run /mcp auth ${name} to request a fresh link.` };
+          const reason = controller.signal.aborted ? 'expired' : 'failed';
+          const detail = reason === 'expired' ? 'OAuth authorization expired before completion.' : completionFailure(error).message;
+          const result: LoginResult = { status: 'authorization_failed', server: name, message: `Authorization ${reason}. ${detail} Run /mcp auth ${name} to request a fresh link.` };
           this.pending.set(name, { starting: Promise.resolve(result), controller, failed: true });
-          this.notify(name, false, reason);
+          this.notify(name, false, reason, detail);
         }).catch(() => { /* Notification delivery must not expose callback/token diagnostics. */ })
         .finally(() => { clearTimeout(timer); receiver.release(); this.tasks.delete(completion); });
       this.tasks.add(completion);

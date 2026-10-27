@@ -2,6 +2,7 @@ import { constants } from 'node:fs';
 import { mkdir, lstat, open, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { ensureWindowsPrivateLockDirectory } from './windows-lock.ts';
 
 /**
  * A credential transaction may wait on a network request, unlike pi-team's
@@ -11,10 +12,15 @@ import { setTimeout as delay } from 'node:timers/promises';
 export async function withCredentialLock<T>(root: string, key: string, operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   if (!/^[a-f0-9]{64}$/.test(key)) throw new Error('Invalid credential lock identifier');
   signal?.throwIfAborted();
-  await mkdir(root, { recursive: true, mode: 0o700 });
+  const created = await mkdir(root, { recursive: true, mode: 0o700 });
   const info = await lstat(root);
-  if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid())) {
+  if (!info.isDirectory() || info.isSymbolicLink() || (process.platform !== 'win32' && ((info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid())))) {
     throw new Error('MCP credential lock directory must be private, owned by this user, and not symlinked');
+  }
+  if (process.platform === 'win32') {
+    await ensureWindowsPrivateLockDirectory(root, created !== undefined);
+    const verified = await lstat(root);
+    if (!verified.isDirectory() || verified.isSymbolicLink() || verified.ino !== info.ino || verified.dev !== info.dev) throw new Error('MCP credential lock directory changed during ACL verification');
   }
   const path = join(root, `${key}.lock`);
   const deadline = Date.now() + 30000;

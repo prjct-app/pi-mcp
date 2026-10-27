@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { withCredentialLock } from './store.ts';
 import { safeUrl, type ServerConfig } from './config.ts';
+import { completionFailure, OAuthCompletionError, singleUseTokenFetch } from './auth-completion.ts';
 
 const MAX_AUTHORIZATION_URL_LENGTH = 4096;
 
@@ -23,20 +24,37 @@ export interface SecretStore {
   delete(key: string): Promise<void>;
 }
 
+/** Narrow native boundary; injected tests never load the operating system keychain. */
+export interface KeyringEntry {
+  getPassword(): Promise<string | null>;
+  setPassword(value: string): Promise<void>;
+  deleteCredential(): Promise<boolean>;
+}
+export type KeyringLoader = () => Promise<{
+  AsyncEntry: new (service: string, username: string, options: import('@napi-rs/keyring').EntryOptions) => KeyringEntry;
+}>;
+
 /** Loaded only when OAuth is used. No plaintext fallback, migration, or adapter keychain access. */
 export class KeyringSecrets implements SecretStore {
-  constructor(private readonly lockRoot = join(process.env.PRJCT_HOME ?? join(homedir(), '.prjct'), 'pi-mcp', 'locks')) {}
+  constructor(
+    private readonly lockRoot = join(process.env.PRJCT_HOME ?? join(homedir(), '.prjct'), 'pi-mcp', 'locks'),
+    private readonly loadKeyring: KeyringLoader = () => import('@napi-rs/keyring'),
+  ) {}
   withLock<T>(key: string, operation: () => Promise<T>, signal?: AbortSignal) { return withCredentialLock(this.lockRoot, key, operation, signal); }
-  private async entry(key: string) {
-    const { AsyncEntry } = await import('@napi-rs/keyring');
-    return new AsyncEntry('app.prjct.pi-mcp', key);
+  private async entry(key: string): Promise<KeyringEntry> {
+    const { AsyncEntry } = await this.loadKeyring();
+    // The auto-selected Linux backend can silently change to kernel memory when
+    // D-Bus is unavailable. Require durable Secret Service for every operation.
+    // The native binding accepts and ignores Linux options on macOS and Windows.
+    return new AsyncEntry('app.prjct.pi-mcp', key, { linux: { store: 'secret-service' } });
   }
-  async get(key: string) { return (await this.entry(key)).getPassword(); }
-  async set(key: string, value: string) { await (await this.entry(key)).setPassword(value); }
-  async delete(key: string) {
-    const entry = await this.entry(key);
-    // A missing entry is already deleted; anything still readable is a real failure.
-    await entry.deleteCredential().catch(async error => { if (await entry.getPassword().catch(() => undefined)) throw error; });
+  async get(key: string): Promise<string | undefined> { return (await (await this.entry(key)).getPassword()) ?? undefined; }
+  async set(key: string, value: string): Promise<void> { await (await this.entry(key)).setPassword(value); }
+  async delete(key: string): Promise<void> {
+    // v2 distinguishes absence from unavailable/locked/ambiguous storage. Never
+    // swallow those errors or claim removal without a fresh independent read.
+    await (await this.entry(key)).deleteCredential();
+    if (await this.get(key) !== undefined) throw new Error('Cannot remove secure MCP credentials');
   }
 }
 
@@ -76,8 +94,10 @@ interface Flow {
   url?: string;
   state: string;
   expiresAt: number;
+  generation: number;
 }
 type AccountState = Readonly<{
+  generation: number;
   record: Promise<StoredRecord>;
   refresh?: Promise<void>;
   starting?: Promise<{ url?: string }>;
@@ -126,7 +146,7 @@ export class OAuthManager {
     const key = createHash('sha256').update(binding).digest('hex');
     const record = this.readRecord(key, binding);
     void record.catch(() => {});
-    const created: Account = { name, config, key, binding, current: { record, blocked: false, lastRefresh: 0 } };
+    const created: Account = { name, config, key, binding, current: { record, blocked: false, lastRefresh: 0, generation: 0 } };
     this.accounts.set(name, created);
     return created;
   }
@@ -152,14 +172,23 @@ export class OAuthManager {
   private async persist(account: Account, record: StoredRecord) {
     this.shutdown.signal.throwIfAborted();
     if (Object.keys(record.issuers).length > 8) throw new Error('Too many OAuth issuers; clear this account explicitly');
-    try { await this.store.set(account.key, JSON.stringify(record)); }
-    catch { updateAccount(account, { blocked: true }); throw new Error('Cannot save secure MCP credentials. No plaintext fallback is used.'); }
+    const serialized = JSON.stringify(record);
+    try {
+      await this.store.set(account.key, serialized);
+      // A fulfilled native write is not sufficient: do not issue a link or accept tokens
+      // unless a separate read sees the exact issuer-bound record, while still under lock.
+      if (await this.store.get(account.key) !== serialized) throw new OAuthCompletionError('credentials_write');
+    } catch {
+      updateAccount(account, { blocked: true });
+      throw new OAuthCompletionError('credentials_write');
+    }
   }
 
   private createProvider(account: Account, interactive: boolean): { provider: OAuthClientProvider; flow: Flow } {
     const redirectUrl = this.redirectUri(account.name);
     const transient: { current: Readonly<{ verifier?: string; discovery?: OAuthDiscoveryState }> } = { current: {} };
-    const flow: Flow = { provider: undefined!, state: randomBytes(32).toString('hex'), expiresAt: Date.now() + 300000 };
+    const flow: Flow = { provider: undefined!, state: randomBytes(32).toString('hex'), expiresAt: Date.now() + 300000, generation: account.current.generation };
+    const assertCurrent = () => { if (flow.generation !== account.current.generation) throw new OAuthCompletionError('expired'); };
     const credentials = async (issuer?: string) => {
       const record = await account.current.record;
       const selected = issuer ?? record.activeIssuer;
@@ -190,6 +219,7 @@ export class OAuthManager {
         return expected;
       },
       saveTokens: async (tokens, ctx) => {
+        assertCurrent();
         const issuer = ctx?.issuer ?? tokens.issuer;
         if (!issuer || tokens.issuer !== issuer) throw new Error('OAuth tokens lack an issuer binding');
         const record = await account.current.record;
@@ -199,9 +229,11 @@ export class OAuthManager {
           expiresAt: tokens.expires_in === undefined ? undefined : Date.now() + tokens.expires_in * 1000,
         } } };
         await this.persist(account, next);
+        assertCurrent();
         updateAccount(account, { record: Promise.resolve(next) });
       },
       redirectToAuthorization: url => {
+        assertCurrent();
         if (!interactive) throw new AuthRequired(account.name);
         const target = validateAuthorizationUrl(url.href);
         flow.url = target.href; // Returned as a user-clickable link. Never spawned; codes and tokens stay private.
@@ -212,12 +244,14 @@ export class OAuthManager {
       discoveryState: () => transient.current.discovery,
     };
     if (interactive) provider.saveClientInformation = async (client, ctx) => {
+      assertCurrent();
       const issuer = ctx?.issuer ?? client.issuer;
       if (!issuer || client.issuer !== issuer) throw new Error('OAuth client lacks an issuer binding');
       const record = await account.current.record;
       const previous = Object.hasOwn(record.issuers, issuer) ? record.issuers[issuer] : undefined;
       const next = { ...record, issuers: { ...record.issuers, [issuer]: { ...previous, client } } };
       await this.persist(account, next);
+      assertCurrent();
       updateAccount(account, { record: Promise.resolve(next) });
     };
     flow.provider = provider;
@@ -238,11 +272,13 @@ export class OAuthManager {
       token: async () => {
         const account = this.account(name);
         if (account.current.blocked) throw new AuthRequired(name);
+        const generation = account.current.generation;
         const record = await account.current.record;
         const saved = record.activeIssuer ? record.issuers[record.activeIssuer] : undefined;
         if (!saved?.tokens) throw new AuthRequired(name);
         if (saved.expiresAt !== undefined && saved.expiresAt < Date.now() + 30000) await this.refresh(account);
         const current = await account.current.record;
+        if (account.current.blocked || generation !== account.current.generation) throw new AuthRequired(name);
         return current.issuers[current.activeIssuer!]?.tokens?.access_token;
       },
       onUnauthorized: async () => {
@@ -287,8 +323,11 @@ export class OAuthManager {
   start(name: string): Promise<{ url?: string }> {
     const account = this.account(name);
     if (account.current.starting) return account.current.starting;
+    const generation = account.current.generation;
     const work = this.store.withLock(account.key, async () => {
+      if (generation !== account.current.generation) throw new OAuthCompletionError('expired');
       await this.reloadRecord(account);
+      if (generation !== account.current.generation) throw new OAuthCompletionError('expired');
       const { provider, flow } = this.createProvider(account, true);
       updateAccount(account, { flow });
       const result = await auth(provider, { serverUrl: account.config.url!, scope: account.config.oauth?.scope, forceReauthorization: true, fetchFn: this.requestFetch() });
@@ -303,21 +342,27 @@ export class OAuthManager {
     const account = this.account(name);
     const flow = account.current.flow;
     updateAccount(account, { flow: undefined }); // Consume even invalid callbacks; authorization codes are single-use.
-    if (!flow || flow.expiresAt < Date.now()) throw new Error('OAuth flow expired; run authentication again');
+    if (!flow || flow.expiresAt < Date.now()) throw new OAuthCompletionError('expired');
     const callback = new URL(redirect);
     const expected = new URL(String(flow.provider.redirectUrl));
     const state = callback.searchParams.get('state') ?? '';
-    if (callback.origin !== expected.origin || callback.pathname !== expected.pathname || callback.hash || callback.username || callback.password) throw new Error('OAuth callback URL mismatch');
-    if (callback.searchParams.getAll('state').length !== 1 || Buffer.byteLength(state) !== Buffer.byteLength(flow.state) || !timingSafeEqual(Buffer.from(state), Buffer.from(flow.state))) throw new Error('OAuth state mismatch');
-    if (callback.searchParams.has('error') || callback.searchParams.getAll('code').length !== 1 || !callback.searchParams.get('code') || callback.searchParams.getAll('iss').length > 1) throw new Error('OAuth callback was rejected');
-    await this.store.withLock(account.key, async () => {
-      await this.reloadRecord(account);
-      await auth(flow.provider, {
-        serverUrl: account.config.url!, authorizationCode: callback.searchParams.get('code')!,
-        iss: callback.searchParams.get('iss') ?? undefined, fetchFn: this.requestFetch(),
-      });
-    }, this.shutdown.signal);
-    updateAccount(account, { blocked: false });
+    if (callback.origin !== expected.origin || callback.pathname !== expected.pathname || callback.hash || callback.username || callback.password) throw new OAuthCompletionError('callback');
+    if (callback.searchParams.getAll('state').length !== 1 || Buffer.byteLength(state) !== Buffer.byteLength(flow.state) || !timingSafeEqual(Buffer.from(state), Buffer.from(flow.state))) throw new OAuthCompletionError('state');
+    if (callback.searchParams.has('error') || callback.searchParams.getAll('code').length !== 1 || !callback.searchParams.get('code') || callback.searchParams.getAll('iss').length > 1) throw new OAuthCompletionError('callback');
+    try {
+      const fetchFn = singleUseTokenFetch(this.requestFetch());
+      await this.store.withLock(account.key, async () => {
+        if (flow.generation !== account.current.generation) throw new OAuthCompletionError('expired');
+        await this.reloadRecord(account);
+        const result = await auth(flow.provider, {
+          serverUrl: account.config.url!, authorizationCode: callback.searchParams.get('code')!,
+          iss: callback.searchParams.get('iss') ?? undefined, fetchFn,
+        });
+        if (result !== 'AUTHORIZED') throw new OAuthCompletionError('unknown');
+      }, this.shutdown.signal);
+      if (flow.generation !== account.current.generation) throw new OAuthCompletionError('expired');
+      updateAccount(account, { blocked: false });
+    } catch (error) { throw completionFailure(error); }
   }
 
   /** Local credential state only; never contacts the network or refreshes. */
@@ -336,7 +381,7 @@ export class OAuthManager {
   /** Forget this server's local credentials. Tokens are not revoked at the authorization server. */
   async logout(name: string): Promise<void> {
     const account = this.account(name);
-    updateAccount(account, { flow: undefined });
+    updateAccount(account, { flow: undefined, blocked: true, generation: account.current.generation + 1 });
     await this.store.withLock(account.key, async () => {
       try { await this.store.delete(account.key); }
       catch { throw new Error('Cannot remove secure MCP credentials. Unlock the OS keyring and try again.'); }
@@ -344,7 +389,7 @@ export class OAuthManager {
     updateAccount(account, { record: Promise.resolve({ version: 1, binding: account.binding, issuers: {} }), blocked: false, lastRefresh: 0 });
   }
 
-  cancel(name: string) { const account = this.accounts.get(name); if (account) updateAccount(account, { flow: undefined }); }
+  cancel(name: string) { const account = this.accounts.get(name); if (account) updateAccount(account, { flow: undefined, generation: account.current.generation + 1 }); }
 
   close() {
     this.shutdown.abort(new Error('MCP OAuth manager is closed'));

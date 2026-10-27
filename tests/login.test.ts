@@ -10,7 +10,7 @@ import { harness } from './harness.ts';
 import { MemorySecrets, oauthFixture } from './fixtures/oauth.ts';
 import { OAuthManager } from '../src/auth.ts';
 
-async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'print' | 'json'; authorizationEndpoint?: string } = {}) {
+async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'print' | 'json'; authorizationEndpoint?: string; tokenError?: string; tokenStatus?: number } = {}) {
   const reservation = createServer();
   reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
   const port = (reservation.address() as { port: number }).port;
@@ -18,7 +18,7 @@ async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'prin
   const root = await mkdtemp(join(tmpdir(), 'pi-mcp-login-'));
   const servers = { remote: { url: 'https://mcp.example.test/mcp', auth: 'oauth' as const, oauth: { redirectUri: `http://127.0.0.1:${port}/callback` } } };
   await writeFile(join(root, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
-  const fixture = oauthFixture({ authorizationEndpoint: options.authorizationEndpoint });
+  const fixture = oauthFixture({ authorizationEndpoint: options.authorizationEndpoint, tokenError: options.tokenError, tokenStatus: options.tokenStatus });
   const store = new MemorySecrets();
   const host = await harness(root, { mode: options.mode, dependencies: { secretStore: store, fetchFn: fixture.fetchFn, authTimeoutMs: options.timeoutMs } });
   return { root, servers, fixture, store, host, async close() { await host.emit('session_shutdown'); await rm(root, { recursive: true, force: true }); } };
@@ -166,4 +166,39 @@ test("two configured servers can share the callback port without consuming each 
     await delay(20);
     assert.equal(test.host.messages.filter(entry => entry.options?.triggerTurn).length, 2);
   } finally { await test.close(); }
+});
+
+test('the browser and Pi notification show a safe token failure and do not retry automatically', async () => {
+  const instance = await setup({ tokenError: 'invalid_grant' });
+  try {
+    const result = body(await instance.host.tool({ action: 'tools', server: 'remote' }));
+    const response = await fetch(callback(result.authorizationUrl));
+    assert.equal(response.status, 400);
+    const browser = await response.text();
+    assert.match(browser, /HTTP 400, invalid_grant/);
+    assert.doesNotMatch(browser, /private-provider|fixture-code|fixture-token/);
+    const notification = instance.host.messages.find(entry => entry.message.customType === 'mcp-auth');
+    assert.match(String(notification?.message.content), /HTTP 400, invalid_grant/);
+    assert.match(String(notification?.message.content), /Do not retry automatically/);
+    assert.equal(notification?.options.triggerTurn, false);
+    assert.equal(instance.fixture.requests.filter(url => url.endsWith('/token')).length, 1);
+    assert.equal(body(await instance.host.tool({ action: 'tools', server: 'remote' })).status, 'authorization_failed');
+    assert.equal(instance.fixture.requests.filter(url => url.endsWith('/token')).length, 1);
+    assert.equal(instance.host.messages.filter(entry => entry.message.customType === 'mcp-auth-link').length, 1);
+  } finally { await instance.close(); }
+});
+
+test('missing registered client credentials are not hidden behind an unclassified callback failure', async () => {
+  const instance = await setup();
+  try {
+    const result = body(await instance.host.tool({ action: 'tools', server: 'remote' }));
+    instance.store.data.clear();
+    const response = await fetch(callback(result.authorizationUrl));
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /Saved OAuth client registration is missing/);
+    const notification = instance.host.messages.find(entry => entry.message.customType === 'mcp-auth');
+    assert.match(String(notification?.message.content), /Saved OAuth client registration is missing/);
+    assert.equal(notification?.options.triggerTurn, false);
+    assert.equal(instance.fixture.requests.filter(url => url.endsWith('/token')).length, 0);
+  } finally { await instance.close(); }
 });
