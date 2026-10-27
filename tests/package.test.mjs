@@ -27,3 +27,36 @@ test('Pi discovers exactly the extension declared by the package manifest', asyn
     assert.equal(manifest.devDependencies['@earendil-works/pi-coding-agent'], '1.0.4');
   } finally { await rm(agentDir, { recursive: true, force: true }); }
 });
+
+test('the complete locked dependency tree stays above the reviewed security floors', async () => {
+  const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  const lock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
+  assert.equal(manifest.dependencies.zod, '^4.6.6');
+  assert.equal(manifest.devDependencies['@modelcontextprotocol/server'], '2.3.1');
+  assert.equal(manifest.overrides.hono, '^4.13.11');
+  assert.equal(manifest.overrides.undici, '8.12.2');
+  assert.equal(manifest.dependencies['@napi-rs/keyring'], '2.1.2');
+  assert.equal(manifest.devDependencies['@napi-rs/keyring-legacy-fixture'], 'npm:@napi-rs/keyring@1.3.0');
+  assert.equal(lock.packages['node_modules/@napi-rs/keyring-legacy-fixture'].dev, true);
+  for (const [path, entry] of Object.entries(lock.packages)) {
+    if (path.includes('node_modules/@napi-rs/keyring') && entry.version === '1.3.0') {
+      assert.equal(entry.dev, true, `Old native binding leaked into runtime installation: ${path}`);
+    }
+  }
+  const floors = {
+    zod: [4, 6, 6],
+    hono: [4, 13, 11],
+    undici: [8, 12, 2],
+    '@modelcontextprotocol/server': [2, 3, 1],
+  };
+  for (const [name, floor] of Object.entries(floors)) {
+    const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith(`node_modules/${name}`));
+    assert.ok(entries.length > 0, `Missing locked dependency ${name}`);
+    for (const [path, entry] of entries) {
+      assert.match(entry.version, /^\d+\.\d+\.\d+$/);
+      const version = entry.version.split('.').map(Number);
+      const difference = version.map((part, index) => part - floor[index]).find(value => value !== 0) ?? 0;
+      assert.ok(difference >= 0, `${path}@${entry.version} is below its reviewed security floor`);
+    }
+  }
+});

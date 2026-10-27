@@ -60,11 +60,11 @@ export class Sessions {
           return token;
         } };
       }, this.options.fetchFn, { tools: (name, tools, server) => this.native.sync(name, tools, server), withdraw: name => this.native.withdraw(name) });
-      const links = new modules.login.AuthLinks(auth, name => { runtime.enable(name); return runtime.reconnect(name); }, (name, success, reason) => {
+      const links = new modules.login.AuthLinks(auth, name => { runtime.enable(name); return runtime.reconnect(name); }, (name, success, reason, detail) => {
         if (this.slot.current.closed || this.slot.current.pending !== pending) return;
         this.pi.sendMessage({ customType: 'mcp-auth', display: true, content: success
           ? `MCP server ${name} is now authorized. Continue the user's pending request. No pending MCP operation was automatically replayed; check any previous ambiguous failure before retrying a mutation.`
-          : `MCP authorization for ${name} ${reason ?? 'did not complete'}. Do not retry automatically; /mcp auth ${name} requests a fresh link.`,
+          : `MCP authorization for ${name} ${reason ?? 'did not complete'}. ${detail ? detail + ' ' : ''}Do not retry automatically; /mcp auth ${name} requests a fresh link.`,
         }, { triggerTurn: success, deliverAs: 'followUp' });
       }, this.options.authTimeoutMs);
       return { runtime, auth, get servers() { return runtime.servers; }, sources: config.sources, links, modules };

@@ -152,6 +152,12 @@ When the agent needs OAuth credentials, it shows **one link**. The user clicks a
 
 The loopback receiver exists only during authorization (max 5 minutes), bound to loopback, validating state and callback target. No widgets or scripts.
 
+OAuth requires an available, unlocked OS credential store. On Linux, this must be a freedesktop Secret Service (for example gnome-keyring, KWallet or KeePassXC) reachable over the Pi process's session D-Bus. Linux operations are pinned to Secret Service: there is no fallback to the volatile kernel keyring. macOS and Windows continue to use their native stores. Existing persistent credential identities are unchanged; old kernel-only entries are not migrated and require an explicit sign-in after Secret Service is available. See [OAuth storage](docs/oauth-storage.md).
+
+Secure credential writes are read back under the same lock before an authorization link is issued or tokens are accepted. If storage does not retain the record, sign-in stops with a secure-storage error instead of offering an unusable link. A registration removed after the link was issued is reported explicitly.
+
+Callback failures show a safe cause in the browser and Pi notification, such as an HTTP status with a known OAuth error code, an issuer validation failure, or unavailable secure storage. Provider descriptions, callback values, authorization codes, and tokens are never shown. A failed code exchange is not replayed by SDK recovery; only an explicit `/mcp auth <server>` requests a new link.
+
 ---
 
 ## Agent tool
@@ -187,6 +193,7 @@ When credentials are missing, the tool returns `authorization_required` and plac
 | Overflow files | Private; 50 MiB per session |
 | Images | 4 inline, max 2 MiB base64 each (PNG/JPEG/GIF/WebP) |
 | OAuth | 20s per network phase, 5min callback window |
+| OAuth token response | 1 MiB |
 | Credential locks | 30s wait; never steal locks automatically |
 
 ---

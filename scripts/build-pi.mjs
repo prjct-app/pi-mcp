@@ -112,9 +112,15 @@ for (const item of config.copy) {
   await cp(join(root, item), join(target, item), { recursive: true });
 }
 
+// External entries can name export subpaths (for example package/privacy).
+// Node resolves those through the package's exports; link the package root, not
+// a nonexistent subdirectory, and link it only once for multiple subpaths.
+const externalPackages = [...new Set(config.external.map(name =>
+  name.startsWith('@') ? name.split('/').slice(0, 2).join('/') : name.split('/')[0],
+))];
 // Only the declared runtime externals are reachable; they link to this
 // repository's installed copies, whose own dependencies resolve from there.
-for (const name of config.external) {
+for (const name of externalPackages) {
   const link = join(target, 'node_modules', name);
   await mkdir(dirname(link), { recursive: true });
   await symlink(await realpath(join(root, 'node_modules', name)), link, 'dir');
