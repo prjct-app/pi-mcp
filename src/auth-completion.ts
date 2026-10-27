@@ -1,6 +1,11 @@
-import { AuthorizationServerMismatchError, InsecureTokenEndpointError, IssuerMismatchError, OAuthError } from '@modelcontextprotocol/client';
+import { AuthorizationServerMismatchError, InsecureTokenEndpointError, IssuerMismatchError, OAuthError, RegistrationRejectedError } from '@modelcontextprotocol/client';
 
 const MESSAGES = {
+  authorization_start: 'OAuth authorization could not start. Check the server OAuth configuration and discovery metadata.',
+  registration: 'OAuth client registration was rejected. Check the provider client and redirect URI requirements.',
+  callback_port: 'OAuth callback port is unavailable; another session may be authenticating.',
+  authorization_link: 'OAuth did not provide a valid, bounded HTTPS authorization link with state.',
+  authorization_network: 'OAuth discovery or registration could not reach the authorization server or timed out.',
   callback: 'OAuth callback was invalid or denied; no authorization code was redeemed.',
   expired: 'OAuth authorization expired before the callback completed.',
   state: 'OAuth callback state did not match; no authorization code was redeemed.',
@@ -21,7 +26,7 @@ type FailureKind = keyof typeof MESSAGES;
 const FAILURE = Symbol.for('app.prjct.pi-mcp.oauth-completion-failure');
 type FailureData = Readonly<{ kind: FailureKind; code?: string; status?: number }>;
 const OAUTH_CODES = new Set(['access_denied', 'invalid_request', 'invalid_client', 'unauthorized_client', 'invalid_grant',
-  'invalid_scope', 'unsupported_grant_type', 'server_error', 'temporarily_unavailable', 'invalid_dpop_proof', 'use_dpop_nonce']);
+  'invalid_scope', 'invalid_redirect_uri', 'invalid_client_metadata', 'unsupported_grant_type', 'server_error', 'temporarily_unavailable', 'invalid_dpop_proof', 'use_dpop_nonce']);
 function knownCode(value: unknown): string | undefined { return typeof value === 'string' && OAUTH_CODES.has(value) ? value : undefined; }
 
 /** Messages are built solely from local constants, allowlisted OAuth codes and bounded HTTP status. */
@@ -53,6 +58,32 @@ export function completionFailure(error: unknown): OAuthCompletionError {
   if (message === 'Another Pi session holds the OAuth lock. Inspect mcp-locks and its PID before manually recovering an abandoned lock.') return new OAuthCompletionError('credentials_lock');
   if (error instanceof Error && error.name === 'ZodError') return new OAuthCompletionError('token_response');
   return new OAuthCompletionError('unknown');
+}
+
+/** Startup has no callback/code to redeem. Keep its failures distinct from completion. */
+export function authorizationFailure(error: unknown): OAuthCompletionError {
+  if (error instanceof RegistrationRejectedError) {
+    const code = (() => {
+      try { return typeof error.body === 'string' && error.body.length <= 16384 ? JSON.parse(error.body)?.error : undefined; }
+      catch { return undefined; }
+    })();
+    return new OAuthCompletionError('registration', code, error.status);
+  }
+  const known = completionFailure(error);
+  if (known.kind !== 'unknown') return known;
+  const message = error instanceof Error ? error.message : '';
+  if (message === MESSAGES.callback_port) return new OAuthCompletionError('callback_port');
+  if (['OAuth did not provide an authorization link', 'OAuth did not return an authorization URL',
+    'OAuth authorization link lacks state', 'OAuth authorization requires HTTPS',
+    'OAuth authorization URL exceeds the safe display limit'].includes(message)) return new OAuthCompletionError('authorization_link');
+  if (error instanceof Error && ['TypeError', 'AbortError', 'TimeoutError'].includes(error.name)) return new OAuthCompletionError('authorization_network');
+  return new OAuthCompletionError('authorization_start');
+}
+
+/** Preserve only recognized, rebuilt diagnostics across the lazy module boundary. */
+export function oauthDiagnostic(error: unknown): string | undefined {
+  const failure = completionFailure(error);
+  return failure.kind === 'unknown' ? undefined : failure.message;
 }
 
 const MAX_TOKEN_RESPONSE_BYTES = 1024 * 1024;

@@ -26,7 +26,7 @@ type Session = Readonly<{ pending?: Promise<Services>; closed: boolean }>;
 export function diagnostic(error: unknown): string {
   const modules = loaded.ready;
   if (modules && (error instanceof modules.auth.AuthRequired || error instanceof modules.login.AuthLinkError || error instanceof modules.runtime.ServerOffline)) return error.message;
-  return safeDiagnostic(error);
+  return modules?.auth.oauthDiagnostic(error) ?? safeDiagnostic(error);
 }
 
 /** Configuration and SDK loading stay lazy. Session disposal is idempotent. */
@@ -64,7 +64,7 @@ export class Sessions {
         if (this.slot.current.closed || this.slot.current.pending !== pending) return;
         this.pi.sendMessage({ customType: 'mcp-auth', display: true, content: success
           ? `MCP server ${name} is now authorized. Continue the user's pending request. No pending MCP operation was automatically replayed; check any previous ambiguous failure before retrying a mutation.`
-          : `MCP authorization for ${name} ${reason ?? 'did not complete'}. ${detail ? detail + ' ' : ''}Do not retry automatically; /mcp auth ${name} requests a fresh link.`,
+          : `MCP authorization for ${name} ${reason ?? 'did not complete'}. ${detail ? detail + ' ' : ''}Do not retry automatically or re-add the server; action=auth with server=${name} requests a fresh link when the person asks to try again.`,
         }, { triggerTurn: success, deliverAs: 'followUp' });
       }, this.options.authTimeoutMs);
       return { runtime, auth, get servers() { return runtime.servers; }, sources: config.sources, links, modules };

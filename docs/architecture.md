@@ -13,7 +13,7 @@ Follows `pi-team` conventions: minimal root entry, injectable `installMcp`, immu
 | `src/config.ts` | Source precedence, project trust, safe URL and env handling |
 | `src/runtime.ts` | SDK client per server: shared setup, independent calls, teardown |
 | `src/auth.ts` | SDK OAuth, verified issuer-bound secure records, coordinated refresh |
-| `src/auth-completion.ts` | Allowlisted callback diagnostics and single-use token exchange guard |
+| `src/auth-completion.ts` | Allowlisted startup/callback diagnostics and single-use token exchange guard |
 | `src/login.ts` | Shared authorization links, transient loopback, completion notifications |
 | `src/store.ts` | Cross-process credential transaction lock (no secret payloads) |
 | `src/render.ts` | Compact TUI presentation (schemas stay in agent content) |
@@ -51,7 +51,7 @@ Optional client capabilities are empty. No support advertised for MCP Apps, samp
 ### OAuth authorization_code
 
 - Transport receives only the SDK's narrow bearer-provider interface. Never an interactive OAuth provider.
-- Missing credentials detected before connecting → authorization link.
+- Missing credentials detected before connecting → authorization link. Agent `auth` explicitly starts/retries sign-in on an existing enabled interactive-OAuth entry without saving configuration. Pending links coalesce; failed starts return a cached `authorization_failed` until explicit retry. Secure-store failures preserve safe diagnostics and never imply missing credentials.
 - SDK handles discovery, PKCE S256, client registration, issuer checks, and code exchange.
 - **Secure records**: keyed by hash of server name + endpoint + OAuth settings. Namespace `app.prjct.pi-mcp`. Native OS keyring only, no plaintext fallback. `@napi-rs/keyring` is pinned to 2.1.2; every Linux entry requires `secret-service`, never auto-selected kernel memory. Native missing values are normalized to `undefined`, but unavailable/locked/ambiguous reads and failed deletions are propagated. Every write is independently read back under the credential lock before issuing a link or accepting tokens; silent loss or changed content fails closed.
 - **Code exchange**: only one POST during callback completion, independently of earlier endpoint metadata so callback rediscovery cannot bypass the guard. Failed responses are classified before SDK recovery can log arbitrary provider descriptions or replay the single-use code. Response inspection uses one bounded 1 MiB buffer without a cloning tee or recursive per-fragment arrays; SDK token-schema, issuer, resource and PKCE checks still apply.

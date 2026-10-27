@@ -7,6 +7,8 @@ import { withCredentialLock } from './store.ts';
 import { safeUrl, type ServerConfig } from './config.ts';
 import { completionFailure, OAuthCompletionError, singleUseTokenFetch } from './auth-completion.ts';
 
+export { oauthDiagnostic } from './auth-completion.ts';
+
 const MAX_AUTHORIZATION_URL_LENGTH = 4096;
 
 /** @internal Validate the exact link that may be displayed in the terminal. */
@@ -160,7 +162,7 @@ export class OAuthManager {
         if ((credentials.tokens && credentials.tokens.issuer !== issuer) || (credentials.client && credentials.client.issuer !== issuer)) throw new Error('OAuth issuer binding mismatch');
       }
       return parsed.data as StoredRecord;
-    }).catch(() => { throw new Error('Cannot read secure MCP credentials. Unlock the OS keyring; no plaintext fallback is used.'); });
+    }).catch(() => { throw new OAuthCompletionError('credentials_read'); });
   }
 
   private async reloadRecord(account: Account) {

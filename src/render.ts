@@ -61,7 +61,7 @@ export const renderResult: NonNullable<ToolDefinition['renderResult']> = (result
   const value = parse();
   const data = record(value);
   if (data.status === 'authorization_required') return mcpRow(theme, request, SYMBOL.attention, 'warning', 'sign-in needed · link in the reply', 'warning');
-  if (data.status === 'authorization_failed') return mcpRow(theme, request, SYMBOL.attention, 'warning', 'sign-in expired · /mcp', 'warning');
+  if (data.status === 'authorization_failed') return mcpRow(theme, request, SYMBOL.attention, 'warning', 'sign-in failed · details in reply', 'warning');
 
   const action = label(record(context.args).action);
   const items = action === 'tools' && Array.isArray(data.items) ? data.items : Array.isArray(value) ? value : undefined;

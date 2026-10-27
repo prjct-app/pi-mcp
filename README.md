@@ -31,6 +31,10 @@ pi --no-extensions -e ./build
 
 ## Configuration
 
+The package ships with **no configured servers or credentials**. Installing or updating it does not create integrations or erase your existing configuration. With no server entries in the files below, `/mcp status` is empty.
+
+To start over, sign out of each OAuth server with `/mcp logout <name>`, then remove its entry from the configuration files below (including disabled entries). An empty configuration is `{ "mcpServers": {} }`. Run `/reload` afterward: an open session retains its previous server list until reloaded. Environment-based credentials are managed separately and are not deleted by removing a server.
+
 Reads `mcp.json` files in this order (later entries replace servers entirely, no merge):
 
 1. `$XDG_CONFIG_HOME/mcp/mcp.json` (default `~/.config/mcp/mcp.json`)
@@ -156,7 +160,7 @@ OAuth requires an available, unlocked OS credential store. On Linux, this must b
 
 Secure credential writes are read back under the same lock before an authorization link is issued or tokens are accepted. If storage does not retain the record, sign-in stops with a secure-storage error instead of offering an unusable link. A registration removed after the link was issued is reported explicitly.
 
-Callback failures show a safe cause in the browser and Pi notification, such as an HTTP status with a known OAuth error code, an issuer validation failure, or unavailable secure storage. Provider descriptions, callback values, authorization codes, and tokens are never shown. A failed code exchange is not replayed by SDK recovery; only an explicit `/mcp auth <server>` requests a new link.
+Callback failures show a safe cause in the browser and Pi notification, such as an HTTP status with a known OAuth error code, an issuer validation failure, or unavailable secure storage. Provider descriptions, callback values, authorization codes, and tokens are never shown. A failed code exchange is not replayed by SDK recovery; only an explicit agent `auth` action (or `/mcp auth <server>`) requests a new link. Startup failures also return a safe cause: unavailable credentials, rejected client registration, a busy callback port, or invalid authorization metadata. Pending links are reused, and ordinary discovery never retries a failed authorization.
 
 ---
 
@@ -167,6 +171,7 @@ A single proxy tool keeps the surface small. It is reached only from codemode sc
 ```js
 // inside a codemode script: tools.mcp(...)
 await tools.mcp({ action: "status" })
+await tools.mcp({ action: "auth", server: "jira" }) // only when the user requests sign-in or a retry; reuses the existing entry
 await tools.mcp({ action: "tools", server: "jira", query: "search", limit: 5 })
 await tools.mcp({ action: "call", server: "jira", tool: "name", args: {} })
 await tools.mcp({ action: "resources", server: "local" })
@@ -178,7 +183,7 @@ await tools.mcp({ action: "complete", server: "local", uri: "example://docs/{top
 await tools.mcp({ action: "add", server: "svelte", config: { url: "https://mcp.svelte.dev/mcp" }, uri: "https://svelte.dev/docs/ai/remote-setup" })  // sign-in is detected
 ```
 
-When credentials are missing, the tool returns `authorization_required` and places one clickable authorization link in the conversation. Do not open it, poll, or ask for callbacks. Wait for the `mcp-auth` message. MCP tool errors become Pi errors.
+When credentials are missing, the tool returns `authorization_required` and places one clickable authorization link in the conversation. Do not open it, poll, or ask for callbacks. Wait for the `mcp-auth` message. If startup fails, `authorization_failed` explains the cause without exposing credentials or provider response bodies. Fix the cause, then use `action: "auth"` only when the user requests another attempt. Do not replace or re-add the server just to sign in. Auth requires an interactive/RPC session and an enabled interactive-OAuth server; it does not change `mcp.json` or replay a pending MCP operation. MCP tool errors become Pi errors.
 
 ---
 
