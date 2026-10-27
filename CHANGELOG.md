@@ -1,3 +1,9 @@
+## [0.4.4](https://github.com/prjct-app/pi-mcp/compare/v0.4.3...v0.4.4) (2026-10-27)
+
+### Bug Fixes
+
+* **oauth:** recover agent authentication without re-adding servers ([bfb7d6f](https://github.com/prjct-app/pi-mcp/commit/bfb7d6fb98e144248b490820c0e7fd88c713f0e8))
+
 ## [0.4.3](https://github.com/prjct-app/pi-mcp/compare/v0.4.2...v0.4.3) (2026-10-27)
 
 ### Bug Fixes
