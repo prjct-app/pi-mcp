@@ -73,6 +73,57 @@ for (const mode of ['tui', 'rpc', 'print', 'json'] as const) {
   });
 }
 
+test('a clean installation loads the real package with no integrations or generated configuration', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-clean-'));
+  const oldAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const oldXdg = process.env.XDG_CONFIG_HOME;
+  const shutdown: { stop?: () => Promise<void> } = {};
+  try {
+    process.env.PI_CODING_AGENT_DIR = dir;
+    process.env.XDG_CONFIG_HOME = dir;
+    const host = await harness(dir, { mode: 'print', realPackage: true, trusted: true });
+    shutdown.stop = () => host.emit('session_shutdown');
+    await host.emit('session_start');
+    const content = (await host.tool({ action: 'status' })).content[0];
+    assert.ok(content?.type === 'text');
+    assert.deepEqual(JSON.parse(content.text), []);
+    assert.deepEqual([...host.tools.keys()], ['mcp']);
+    assert.deepEqual(host.notices, []);
+    assert.deepEqual(host.messages, []);
+    for (const path of ['mcp.json', '.mcp.json', '.pi/mcp.json', 'mcp/mcp.json', 'mcp-auth.json']) {
+      await assert.rejects(access(join(dir, path)), { code: 'ENOENT' });
+    }
+  } finally {
+    await shutdown.stop?.();
+    if (oldAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = oldAgentDir;
+    if (oldXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = oldXdg;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('reloading after removing every configured server clears enabled and disabled integrations', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-reset-'));
+  const host = await harness(dir);
+  try {
+    const path = join(dir, 'mcp.json');
+    await writeFile(path, JSON.stringify({ mcpServers: {
+      first: { url: 'https://first.example.test/mcp' },
+      second: { url: 'https://second.example.test/mcp' },
+      disabled: { disabled: true },
+    } }));
+    await host.emit('session_start');
+    const previous = (await host.tool({ action: 'status' })).content[0];
+    assert.ok(previous?.type === 'text');
+    assert.equal(JSON.parse(previous.text).length, 3);
+    await writeFile(path, JSON.stringify({ mcpServers: {} }));
+    await host.emit('session_start');
+    const current = (await host.tool({ action: 'status' })).content[0];
+    assert.ok(current?.type === 'text');
+    assert.deepEqual(JSON.parse(current.text), []);
+    assert.deepEqual([...host.tools.keys()], ['mcp']);
+  } finally { await host.emit('session_shutdown'); await rm(dir, { recursive: true, force: true }); }
+});
+
 test('a fresh Pi session starts without inheriting the closed session runtime', async () => {
   const { harness } = await import('./harness.ts');
   const dir = await mkdtemp(join(tmpdir(), 'pi-mcp-reload-'));

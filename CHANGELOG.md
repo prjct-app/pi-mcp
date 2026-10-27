@@ -9,6 +9,10 @@
 
 ### Bug Fixes
 
+- Add agent `auth` for signing in or explicitly retrying a failed OAuth flow without replacing server configuration. Reuse pending links and keep failed attempts cached until an explicit retry.
+- Preserve safe credential-store and OAuth-startup diagnostics instead of hiding them behind a generic MCP error or a misleading reconnect instruction. Classify registration rejection and busy callback ports without exposing provider bodies or credentials.
+- Test agent authentication through Pi's real TypeScript loader and nested tool pipeline in a separate process without `tsx`, with isolated credentials and offline OAuth fixtures.
+
 - Remove all five inherited dependency-audit findings by raising Zod to its patched security floor, aligning the test MCP server with SDK 2.3.1, and constraining Hono and Undici to patched versions. Audit the complete dependency tree in CI rather than omitting development dependencies.
 - Run the legacy Linux keyring-loss reproduction in CI and bound the native platform jobs to ten minutes. Keep the old binding as an explicit development-only fixture instead of shipping an unused vault dependency and its legacy native binding.
 - Fix Linux OAuth persistence by requiring durable Secret Service instead of silently switching to the volatile kernel keyring when D-Bus is unavailable. Upgrade the native keyring binding to 2.1.2 so storage errors cannot masquerade as absent credentials or successful deletion; preserve existing persistent credential identities.
