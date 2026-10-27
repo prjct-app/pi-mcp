@@ -10,7 +10,7 @@ import { harness } from './harness.ts';
 import { MemorySecrets, oauthFixture } from './fixtures/oauth.ts';
 import { OAuthManager } from '../src/auth.ts';
 
-async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'print' | 'json'; authorizationEndpoint?: string; tokenError?: string; tokenStatus?: number } = {}) {
+async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'print' | 'json'; authorizationEndpoint?: string; tokenError?: string; tokenStatus?: number; registrationFailure?: { active: boolean } } = {}) {
   const reservation = createServer();
   reservation.listen(0, '127.0.0.1'); await once(reservation, 'listening');
   const port = (reservation.address() as { port: number }).port;
@@ -20,7 +20,10 @@ async function setup(options: { timeoutMs?: number; mode?: 'tui' | 'rpc' | 'prin
   await writeFile(join(root, 'mcp.json'), JSON.stringify({ mcpServers: servers }));
   const fixture = oauthFixture({ authorizationEndpoint: options.authorizationEndpoint, tokenError: options.tokenError, tokenStatus: options.tokenStatus });
   const store = new MemorySecrets();
-  const host = await harness(root, { mode: options.mode, dependencies: { secretStore: store, fetchFn: fixture.fetchFn, authTimeoutMs: options.timeoutMs } });
+  const fetchFn: typeof fetch = (input, init) => options.registrationFailure?.active && String(input).endsWith('/register')
+    ? Promise.resolve(new Response(JSON.stringify({ error: 'invalid_client', error_description: 'private-provider fixture-token' }), { status: 400, headers: { 'content-type': 'application/json' } }))
+    : fixture.fetchFn(input, init);
+  const host = await harness(root, { mode: options.mode, dependencies: { secretStore: store, fetchFn, authTimeoutMs: options.timeoutMs } });
   return { root, servers, fixture, store, host, async close() { await host.emit('session_shutdown'); await rm(root, { recursive: true, force: true }); } };
 }
 function body(result: any) { return JSON.parse(result.content.find((block: any) => block.type === 'text').text); }
@@ -75,7 +78,7 @@ test('oversized OAuth authorization URLs are rejected before reaching the TUI', 
   try {
     await test.host.command('tools remote');
     const notice = test.host.notices.at(-1)!;
-    assert.match(notice, /MCP operation failed/);
+    assert.match(notice, /valid, bounded HTTPS authorization link/);
     assert.ok(notice.length < 1000);
     assert.doesNotMatch(notice, /padding=/);
   } finally { await test.close(); }
@@ -201,4 +204,91 @@ test('missing registered client credentials are not hidden behind an unclassifie
     assert.equal(notification?.options.triggerTurn, false);
     assert.equal(instance.fixture.requests.filter(url => url.endsWith('/token')).length, 0);
   } finally { await instance.close(); }
+});
+
+test('agentic OAuth reports registration failure and retries only through auth, without replacing the entry', async () => {
+  const failure = { active: true };
+  const instance = await setup({ registrationFailure: failure });
+  try {
+    const first = body(await instance.host.tool({ action: 'tools', server: 'remote' }));
+    assert.equal(first.status, 'authorization_failed');
+    assert.match(first.message, /registration.*HTTP 400.*invalid_client/i);
+    assert.doesNotMatch(first.message, /private-provider|fixture-token/);
+    failure.active = false;
+    const requests = instance.fixture.requests.length;
+    assert.deepEqual(body(await instance.host.tool({ action: 'tools', server: 'remote' })), first);
+    assert.equal(instance.fixture.requests.length, requests);
+    const result = body(await instance.host.tool({ action: 'auth', server: 'remote' }));
+    assert.equal(result.status, 'authorization_required');
+    const same = body(await instance.host.tool({ action: 'auth', server: 'remote' }));
+    assert.equal(same.authorizationUrl, result.authorizationUrl);
+    assert.deepEqual(instance.host.dialogs, []);
+    assert.equal(instance.host.messages.filter(entry => entry.message.customType === 'mcp-auth-link').length, 1);
+    assert.equal((await fetch(callback(result.authorizationUrl))).status, 200);
+    await delay(20);
+    assert.equal(instance.host.messages.filter(entry => entry.options.triggerTurn).length, 1);
+    assert.match(instance.host.messages.find(entry => entry.options.triggerTurn)!.message.content, /now authorized/);
+  } finally { await instance.close(); }
+});
+
+test('a secure-store read failure reaches the agent safely; auth can recover after unlocking without re-adding', async () => {
+  const instance = await setup();
+  const get = instance.store.get.bind(instance.store);
+  instance.store.get = async () => { throw new Error('private-keyring fixture-token'); };
+  try {
+    await assert.rejects(instance.host.tool({ action: 'tools', server: 'remote' }), error => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /Cannot read secure MCP credentials/);
+      assert.doesNotMatch(error.message, /private-keyring|fixture-token|reconnect/);
+      return true;
+    });
+    assert.deepEqual(instance.fixture.requests, []);
+    instance.store.get = get;
+    const result = body(await instance.host.tool({ action: 'auth', server: 'remote' }));
+    assert.equal(result.status, 'authorization_required');
+    assert.deepEqual(instance.host.dialogs, []);
+  } finally { await instance.close(); }
+});
+
+for (const mode of ['print', 'json'] as const) {
+  test(`agent auth refuses ${mode} before creating a callback or sending OAuth requests`, async () => {
+    const instance = await setup({ mode });
+    try {
+      await assert.rejects(instance.host.tool({ action: 'auth', server: 'remote' }), /interactive or RPC/);
+      assert.deepEqual(instance.fixture.requests, []);
+      assert.deepEqual(instance.host.messages, []);
+    } finally { await instance.close(); }
+  });
+}
+
+test('agent auth rejects unknown, disabled, bearer and machine-OAuth entries without requesting credentials', async () => {
+  const instance = await setup();
+  try {
+    await writeFile(join(instance.root, 'mcp.json'), JSON.stringify({ mcpServers: {
+      disabled: { ...instance.servers.remote, disabled: true },
+      bearer: { url: 'https://mcp.example.test/mcp', auth: 'bearer', bearerTokenEnv: 'MCP_FIXTURE_TOKEN' },
+      machine: { url: 'https://mcp.example.test/mcp', auth: 'oauth', oauth: {
+        grantType: 'client_credentials', clientId: 'fixture', clientSecretEnv: 'MCP_FIXTURE_SECRET', issuer: 'https://auth.example.test',
+      } },
+    } }));
+    for (const server of ['missing', 'disabled']) await assert.rejects(instance.host.tool({ action: 'auth', server }), /unknown or disabled/);
+    for (const server of ['bearer', 'machine']) await assert.rejects(instance.host.tool({ action: 'auth', server }), /does not use interactive OAuth/);
+    assert.deepEqual(instance.fixture.requests, []);
+    assert.deepEqual(instance.host.messages, []);
+  } finally { await instance.close(); }
+});
+
+test('agent auth classifies a busy callback port and can retry after it is released', async () => {
+  const instance = await setup();
+  const port = Number(new URL(instance.servers.remote.oauth.redirectUri).port);
+  const blocker = createServer();
+  blocker.listen(port, '127.0.0.1'); await once(blocker, 'listening');
+  try {
+    const failed = body(await instance.host.tool({ action: 'auth', server: 'remote' }));
+    assert.equal(failed.status, 'authorization_failed');
+    assert.match(failed.message, /callback port is unavailable/);
+    assert.deepEqual(instance.fixture.requests, []);
+    await new Promise<void>(resolve => blocker.close(() => resolve()));
+    assert.equal(body(await instance.host.tool({ action: 'auth', server: 'remote' })).status, 'authorization_required');
+  } finally { blocker.close(); await instance.close(); }
 });

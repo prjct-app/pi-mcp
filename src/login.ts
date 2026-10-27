@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { once } from 'node:events';
 import { OAuthManager } from './auth.ts';
-import { completionFailure } from './auth-completion.ts';
+import { authorizationFailure, completionFailure } from './auth-completion.ts';
 
 export type LoginResult = {
   status: 'authorization_required' | 'authorization_failed';
@@ -119,7 +119,9 @@ export class AuthLinks {
     const starting = this.begin(name, controller).catch(error => {
       const current = this.pending.get(name);
       if (current?.controller === controller) this.pending.set(name, { ...current, failed: true });
-      throw error;
+      const failure = authorizationFailure(error);
+      return { status: 'authorization_failed' as const, server: name,
+        message: `${failure.message} No operation was replayed. Fix the cause, then use action=auth with server=${name} when the person asks to try again. Do not re-add the server.` };
     });
     this.pending.set(name, { starting, controller });
     return starting;
@@ -146,7 +148,7 @@ export class AuthLinks {
           if (this.closed || this.pending.get(name)?.controller !== controller) return; // Closed or cancelled by the user.
           const reason = controller.signal.aborted ? 'expired' : 'failed';
           const detail = reason === 'expired' ? 'OAuth authorization expired before completion.' : completionFailure(error).message;
-          const result: LoginResult = { status: 'authorization_failed', server: name, message: `Authorization ${reason}. ${detail} Run /mcp auth ${name} to request a fresh link.` };
+          const result: LoginResult = { status: 'authorization_failed', server: name, message: `Authorization ${reason}. ${detail} Use action=auth with server=${name} to request a fresh link when the person asks to try again; do not re-add the server.` };
           this.pending.set(name, { starting: Promise.resolve(result), controller, failed: true });
           this.notify(name, false, reason, detail);
         }).catch(() => { /* Notification delivery must not expose callback/token diagnostics. */ })

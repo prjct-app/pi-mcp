@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -26,6 +27,17 @@ test('Pi discovers exactly the extension declared by the package manifest', asyn
     assert.equal(manifest.peerDependencies['@earendil-works/pi-coding-agent'], '*');
     assert.equal(manifest.devDependencies['@earendil-works/pi-coding-agent'], '1.0.4');
   } finally { await rm(agentDir, { recursive: true, force: true }); }
+});
+
+test('the published package contains no personal integrations or installation hooks that seed them', async () => {
+  const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+  for (const hook of ['preinstall', 'install', 'postinstall']) assert.equal(manifest.scripts?.[hook], undefined);
+  const [packed] = JSON.parse(execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], { cwd: root, encoding: 'utf8' }));
+  assert.ok(packed.files.some(file => file.path === 'index.ts'));
+  for (const { path } of packed.files) {
+    assert.doesNotMatch(path, /(^|\/)(\.pi|\.prjct|tests|build|node_modules)(\/|$)/);
+    assert.doesNotMatch(path, /(^|\/)(\.?mcp(?:-auth)?\.json|settings\.json|\.env(?:\..*)?)$/);
+  }
 });
 
 test('the complete locked dependency tree stays above the reviewed security floors', async () => {

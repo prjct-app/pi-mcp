@@ -8,7 +8,8 @@ const root = mkdtempSync(join(tmpdir(), 'pi-isolated-tests-'));
 process.env.PRJCT_HOME = join(root, 'prjct');
 process.env.PI_CODING_AGENT_DIR = join(root, 'agent');
 process.env.PI_MEMORY_HOME = join(root, 'memory');
-for (const path of [process.env.PRJCT_HOME, process.env.PI_CODING_AGENT_DIR, process.env.PI_MEMORY_HOME]) mkdirSync(path, { recursive: true });
+process.env.XDG_CONFIG_HOME = join(root, 'config');
+for (const path of [process.env.PRJCT_HOME, process.env.PI_CODING_AGENT_DIR, process.env.PI_MEMORY_HOME, process.env.XDG_CONFIG_HOME]) mkdirSync(path, { recursive: true });
 registerHooks({ resolve(specifier, context, nextResolve) {
   if (specifier.includes('@napi-rs/keyring')) throw new Error('Tests cannot access the OS keychain; inject an in-memory KeyStore.');
   return nextResolve(specifier, context);

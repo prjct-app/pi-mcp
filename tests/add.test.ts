@@ -193,7 +193,7 @@ test('usage of add costs nothing per request: it arrives only when add is used',
   const h = await host();
   try {
     const description = h.tools.get('mcp')!.description;
-    assert.match(description, /complete, add\./);
+    assert.match(description, /complete, add, auth\./);
     assert.doesNotMatch(description, /bearerTokenEnv|config=/);
     await assert.rejects(h.tool({ action: 'add' }), /server=<short name.*config=.*do not ask for approval first/);
     await assert.rejects(h.tool({ action: 'add', server: 'docs' }), /an endpoint URL alone/);

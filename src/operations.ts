@@ -13,7 +13,7 @@ import { dirname } from 'node:path';
 import { plain } from './output.ts';
 import { Sessions, run, diagnostic, isLogin, type McpOptions, type Services } from './services.ts';
 
-const ACTIONS = ['status', 'tools', 'call', 'resources', 'templates', 'read', 'prompts', 'prompt', 'complete', 'add'] as const;
+const ACTIONS = ['status', 'tools', 'call', 'resources', 'templates', 'read', 'prompts', 'prompt', 'complete', 'add', 'auth'] as const;
 export const ProxyParameters = Type.Object({
   action: StringEnum(ACTIONS), server: Type.Optional(Type.String({ maxLength: 64 })), tool: Type.Optional(Type.String({ maxLength: 256 })),
   args: Type.Optional(Type.Record(Type.String(), Type.Unknown())), query: Type.Optional(Type.String({ maxLength: 256 })),
@@ -95,6 +95,14 @@ export class Operations {
     const server = params.server;
     if (params.action === 'add') return this.add(server, params.config, params.uri, signal, ctx);
     if (!server) throw new Error('Specify an MCP server from action=status');
+    if (params.action === 'auth') {
+      const config = active.servers[server];
+      if (!Object.hasOwn(active.servers, server) || !config || config.disabled) throw new McpFailure('configuration', 'MCP server is unknown or disabled. Check action=status.');
+      if (config.auth !== 'oauth' || config.oauth?.grantType === 'client_credentials') throw new McpFailure('configuration', 'This server does not use interactive OAuth; configure its authentication credentials instead.');
+      if (ctx.mode !== 'tui' && ctx.mode !== 'rpc') throw new McpFailure('configuration', 'OAuth authorization needs an interactive or RPC session; no authorization was started.');
+      // Explicit recovery, not a config rewrite or automatic replay. request() coalesces pending links.
+      return this.finish('auth', server, await active.modules.runtime.abortable(active.links.request(server, true), signal), signal);
+    }
     if (params.action === 'call') {
       if (!params.tool) throw new Error('Specify tool');
       const discovered = await this.resolve(active, server, ctx, () => runtime.tools(server, signal), signal);

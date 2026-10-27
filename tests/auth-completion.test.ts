@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { AuthorizationServerMismatchError, IssuerMismatchError, OAuthError } from '@modelcontextprotocol/client';
-import { completionFailure, OAuthCompletionError, singleUseTokenFetch } from '../src/auth-completion.ts';
+import { AuthorizationServerMismatchError, IssuerMismatchError, OAuthError, RegistrationRejectedError } from '@modelcontextprotocol/client';
+import { authorizationFailure, completionFailure, OAuthCompletionError, oauthDiagnostic, singleUseTokenFetch } from '../src/auth-completion.ts';
 
 const endpoint = 'https://auth.example.test/token';
 const response = (body: unknown, status = 200): Response => new Response(JSON.stringify(body), {
@@ -146,4 +146,34 @@ test('fragmented token bodies use one bounded buffer without a cloning tee or re
   assert.equal(result.headers.get('x-fixture'), 'preserved');
   assert.deepEqual(await result.json(), JSON.parse(new TextDecoder().decode(bytes)));
   assert.equal(cursor.offset, bytes.byteLength);
+});
+
+test('startup diagnostics expose only bounded status and allowlisted registration codes, never provider payloads', () => {
+  for (const body of [
+    JSON.stringify({ error: 'invalid_redirect_uri', error_description: 'private-body fixture-token' }),
+    JSON.stringify({ error: 'private-code', submittedMetadata: 'private-client' }),
+    'private-malformed', 'private-' + 'x'.repeat(20000), 'null',
+  ]) {
+    const error = new RegistrationRejectedError({ status: 400, body, submittedMetadata: { redirect_uris: ['https://private.example.test'] } });
+    const failure = authorizationFailure(error);
+    assert.equal(failure.kind, 'registration');
+    assert.match(failure.message, /HTTP 400/);
+    assert.doesNotMatch(failure.message, /private-|fixture-token|https:\/\//);
+    assert.ok(failure.message.length < 300);
+    if (body.includes('invalid_redirect_uri')) assert.match(failure.message, /invalid_redirect_uri/);
+  }
+  assert.equal(authorizationFailure(new Error('private-unknown')).kind, 'authorization_start');
+  assert.equal(authorizationFailure(new TypeError('private-network')).kind, 'authorization_network');
+});
+
+test('recognized startup/store failures survive lazy module copies with messages rebuilt from the allowlist', async () => {
+  const copy: typeof import('../src/auth-completion.ts') = await import(new URL('../src/auth-completion.ts?startup-copy', import.meta.url).href);
+  for (const kind of ['credentials_read', 'credentials_write', 'callback_port', 'registration'] as const) {
+    const failure = new copy.OAuthCompletionError(kind, 'invalid_client', 400);
+    failure.message = 'private-mutated fixture-token';
+    assert.equal(authorizationFailure(failure).kind, kind);
+    assert.ok(oauthDiagnostic(failure));
+    assert.doesNotMatch(oauthDiagnostic(failure)!, /private-mutated|fixture-token/);
+  }
+  assert.equal(oauthDiagnostic(new Error('private-unknown')), undefined);
 });
