@@ -1,3 +1,10 @@
+## [0.4.3](https://github.com/prjct-app/pi-mcp/compare/v0.4.2...v0.4.3) (2026-10-27)
+
+### Bug Fixes
+
+* **oauth:** persist native credentials reliably across sessions ([4c7f625](https://github.com/prjct-app/pi-mcp/commit/4c7f62524dc08c76a54e7daf0f1b53cb917617e4))
+* **windows:** validate lock ACLs without inherited PowerShell modules ([78b338f](https://github.com/prjct-app/pi-mcp/commit/78b338fdaf4efe2665e655d3b36cfe63ec9bb4d0))
+
 ## Unreleased
 
 ### Bug Fixes
