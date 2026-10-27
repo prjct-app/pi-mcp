@@ -49,6 +49,10 @@ async function suite(root, restart = async () => {}) {
       assert.equal((await call('unavailable', { DBUS_SESSION_BUS_ADDRESS: 'unix:path=' + join(root, 'absent-bus') })).refusedFallback, true);
       assert.equal((await call('verify')).persisted, true, 'An outage must not erase or replace saved credentials');
     }
+  } catch (error) {
+    // A failed cleanup must not hide the original synthetic fixture failure.
+    console.error('Isolated native fixture failure:', error);
+    throw error;
   } finally {
     try { assert.equal((await call('cleanup')).removed, true); }
     finally { if (reproduce) assert.equal((await call('legacy-cleanup')).legacyRemoved, true); }

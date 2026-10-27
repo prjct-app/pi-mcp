@@ -9,6 +9,7 @@ import { promisify } from 'node:util';
 import { AsyncEntry } from '@napi-rs/keyring';
 import { KeyringSecrets, OAuthManager } from '../../src/auth.ts';
 import { oauthFixture } from './oauth.ts';
+import { ensureWindowsPrivateLockDirectory } from '../../src/windows-lock.ts';
 
 const [mode, root, name] = process.argv.slice(2);
 assert.ok(root && root === process.env.PI_MCP_SYNTHETIC_KEYRING_ROOT, 'Use the isolated native-test launcher');
@@ -125,6 +126,16 @@ try {
     }
     case 'windows-acl': {
       assert.equal(process.platform, 'win32');
+      const probe = join(root, 'private-acl-fixture');
+      await mkdir(probe);
+      // Only this isolated synthetic fixture exposes command diagnostics. Production
+      // native/ACL errors remain sanitized; no credential values enter this command.
+      const runner = async (command: string, args: readonly string[], env: NodeJS.ProcessEnv) => {
+        try { return await promisify(execFile)(command, args, { env, timeout: 10000, windowsHide: true }); }
+        catch (error) { console.error('Synthetic Windows ACL command failed:', error); throw error; }
+      };
+      await ensureWindowsPrivateLockDirectory(probe, true, runner);
+      await ensureWindowsPrivateLockDirectory(probe, false, runner);
       const unsafe = join(root, 'unsafe-lock-fixture');
       await mkdir(unsafe);
       const command = win32.join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
