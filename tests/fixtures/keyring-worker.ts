@@ -141,11 +141,11 @@ try {
       const command = win32.join(process.env.SystemRoot!, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
       await promisify(execFile)(command, ['-NoProfile', '-NonInteractive', '-Command', `
 $ErrorActionPreference = 'Stop'
-$acl = Get-Acl -LiteralPath $env:PI_MCP_UNSAFE_LOCK_DIRECTORY
+$acl = [IO.Directory]::GetAccessControl($env:PI_MCP_UNSAFE_LOCK_DIRECTORY)
 $everyone = [Security.Principal.SecurityIdentifier]::new('S-1-1-0')
 $rule = [Security.AccessControl.FileSystemAccessRule]::new($everyone, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.AccessControlType]::Allow)
 $acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $env:PI_MCP_UNSAFE_LOCK_DIRECTORY -AclObject $acl
+[IO.Directory]::SetAccessControl($env:PI_MCP_UNSAFE_LOCK_DIRECTORY, $acl)
 `], { env: { ...process.env, PI_MCP_UNSAFE_LOCK_DIRECTORY: unsafe }, timeout: 10000, windowsHide: true });
       const unsafeStore = new KeyringSecrets(unsafe);
       await assert.rejects(unsafeStore.withLock(counterKey, async () => assert.fail('An unsafe Windows lock was used')), /private Windows ACL/);

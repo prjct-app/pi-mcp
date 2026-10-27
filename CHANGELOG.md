@@ -7,7 +7,7 @@
 - Fix Linux OAuth persistence by requiring durable Secret Service instead of silently switching to the volatile kernel keyring when D-Bus is unavailable. Upgrade the native keyring binding to 2.1.2 so storage errors cannot masquerade as absent credentials or successful deletion; preserve existing persistent credential identities.
 - Verify sign-out removal independently and invalidate in-flight callbacks and pending starts so failed sign-out cannot resume using locally cached tokens.
 - Keep callback code exchanges single-use after endpoint rediscovery and bound token-response memory even for highly fragmented streams.
-- Secure Windows credential-lock directories with verified owner-only ACLs instead of unsupported POSIX permissions; reject unsafe existing directories.
+- Secure Windows credential-lock directories with verified owner-only ACLs instead of unsupported POSIX permissions; reject unsafe existing directories. Use Windows PowerShell's .NET ACL APIs directly so inherited PowerShell 7 module paths cannot break validation.
 - Add isolated native-keyring CI checks on Linux, macOS and Windows for cross-process persistence, concurrent updates, legacy records and the full synthetic OAuth authorization/refresh flow, including Linux daemon restarts.
 - Preserve safe OAuth callback failure reasons in the browser and Pi notifications without exposing codes, tokens, issuer URLs, or provider descriptions.
 - Prevent SDK recovery from replaying a single-use authorization code or logging private provider descriptions during a failed exchange.

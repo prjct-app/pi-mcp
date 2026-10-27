@@ -18,6 +18,10 @@ test('Windows lock validation uses a fixed noninteractive system command and pas
     assert.match(call.args[4]!, /SetAccessRuleProtection/);
     assert.match(call.args[4]!, /Foreign access grant/);
     assert.match(call.args[4]!, /Null DACL/);
+    assert.match(call.args[4]!, /\[IO\.Directory\]::GetAccessControl/);
+    assert.match(call.args[4]!, /\[IO\.Directory\]::SetAccessControl/);
+    assert.match(call.args[4]!, /\[IO\.File\]::GetAttributes/);
+    assert.doesNotMatch(call.args[4]!, /Get-Acl|Set-Acl|Get-Item/, 'ACL validation must not autoload incompatible inherited PowerShell modules');
   }
   assert.equal(seen[0]!.env.PI_MCP_LOCK_CREATED, '1');
   assert.equal(seen[1]!.env.PI_MCP_LOCK_CREATED, '0');

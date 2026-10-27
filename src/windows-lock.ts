@@ -9,13 +9,15 @@ const runAcl: WindowsAclRunner = (command, args, env) => execute(command, args, 
 // The path is passed in the child environment, never interpolated into code.
 // A new directory needs an explicit DACL: Node's mkdir mode is ignored on Windows.
 // Existing directories with foreign grants, a null DACL, or deny rules fail closed.
+// Use the fixed Windows PowerShell's .NET Framework APIs directly: an inherited
+// PowerShell 7 PSModulePath can otherwise load incompatible Get-Acl/Set-Acl modules.
 const PRIVATE_ACL = `
 $ErrorActionPreference = 'Stop'
 $path = $env:PI_MCP_LOCK_DIRECTORY
-$item = Get-Item -LiteralPath $path -Force
-if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe directory' }
+$attributes = [IO.File]::GetAttributes($path)
+if (-not ($attributes -band [IO.FileAttributes]::Directory) -or ($attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Unsafe directory' }
 $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User
-$acl = Get-Acl -LiteralPath $path
+$acl = [IO.Directory]::GetAccessControl($path)
 $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
 $trusted = @($sid.Value, 'S-1-5-18', 'S-1-5-32-544')
 if ($owner -ne $sid.Value -and $owner -ne 'S-1-5-32-544') { throw 'Untrusted owner' }
@@ -33,10 +35,10 @@ $private.SetOwner($sid)
 $private.SetAccessRuleProtection($true, $false)
 $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit', [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
 $private.SetAccessRule($rule)
-Set-Acl -LiteralPath $path -AclObject $private
-$item = Get-Item -LiteralPath $path -Force
-$verified = Get-Acl -LiteralPath $path
-if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $verified.AreAccessRulesProtected -or $verified.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'ACL verification failed' }
+[IO.Directory]::SetAccessControl($path, $private)
+$attributes = [IO.File]::GetAttributes($path)
+$verified = [IO.Directory]::GetAccessControl($path)
+if (-not ($attributes -band [IO.FileAttributes]::Directory) -or ($attributes -band [IO.FileAttributes]::ReparsePoint) -or -not $verified.AreAccessRulesProtected -or $verified.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'ACL verification failed' }
 $granted = $false
 foreach ($rule in $verified.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
   if ($rule.IdentityReference.Value -ne $sid.Value -or $rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow) { throw 'Unexpected access rule' }
