@@ -51,7 +51,18 @@ export class KeyringSecrets implements SecretStore {
     return new AsyncEntry('app.prjct.pi-mcp', key, { linux: { store: 'secret-service' } });
   }
   async get(key: string): Promise<string | undefined> { return (await (await this.entry(key)).getPassword()) ?? undefined; }
-  async set(key: string, value: string): Promise<void> { await (await this.entry(key)).setPassword(value); }
+  async set(key: string, value: string): Promise<void> {
+    await (await this.entry(key)).setPassword(value);
+    const saved = await this.get(key);
+    if (saved === value) return;
+    // Some Secret Service item-creation paths acknowledge the write but leave an
+    // empty secret. Repair only that observed state, once, using the exact same
+    // value under the caller's credential lock. Never retry errors, missing
+    // entries or conflicting nonempty data, and never repeat an OAuth request.
+    if (process.platform !== 'linux' || saved !== '') throw new OAuthCompletionError('credentials_write');
+    await (await this.entry(key)).setPassword(value);
+    if (await this.get(key) !== value) throw new OAuthCompletionError('credentials_write');
+  }
   async delete(key: string): Promise<void> {
     // v2 distinguishes absence from unavailable/locked/ambiguous storage. Never
     // swallow those errors or claim removal without a fresh independent read.

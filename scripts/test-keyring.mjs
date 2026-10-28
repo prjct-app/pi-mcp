@@ -35,6 +35,8 @@ async function suite(root, restart = async () => {}) {
       assert.equal((await call('legacy-loss')).legacyLossReproduced, true);
     }
     assert.equal((await call('legacy-seed')).legacyReadable, true);
+    const loader = await run(process.execPath, [join(project, 'tests/fixtures/keyring-loader-worker.mjs'), root], env);
+    process.stdout.write(loader.stdout);
     await restart();
     assert.equal((await call('authorize')).authorized, true);
     await restart();

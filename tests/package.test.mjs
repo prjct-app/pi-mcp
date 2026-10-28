@@ -44,7 +44,8 @@ test('the complete locked dependency tree stays above the reviewed security floo
   const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
   const lock = JSON.parse(await readFile(join(root, 'package-lock.json'), 'utf8'));
   assert.equal(manifest.dependencies.zod, '^4.6.6');
-  assert.equal(manifest.devDependencies['@modelcontextprotocol/server'], '2.3.1');
+  assert.equal(manifest.devDependencies['@modelcontextprotocol/server'], '2.4.0');
+  assert.equal(manifest.devDependencies['@modelcontextprotocol/node'], '2.1.2');
   assert.equal(manifest.overrides.hono, '^4.13.11');
   assert.equal(manifest.overrides.undici, '8.12.2');
   assert.equal(manifest.dependencies['@napi-rs/keyring'], '2.1.2');
@@ -59,7 +60,8 @@ test('the complete locked dependency tree stays above the reviewed security floo
     zod: [4, 6, 6],
     hono: [4, 13, 11],
     undici: [8, 12, 2],
-    '@modelcontextprotocol/server': [2, 3, 1],
+    '@modelcontextprotocol/server': [2, 4, 0],
+    '@modelcontextprotocol/node': [2, 1, 2],
   };
   for (const [name, floor] of Object.entries(floors)) {
     const entries = Object.entries(lock.packages).filter(([path]) => path.endsWith(`node_modules/${name}`));
