@@ -1,3 +1,9 @@
+## [0.4.5](https://github.com/prjct-app/pi-mcp/compare/v0.4.4...v0.4.5) (2026-10-28)
+
+### Bug Fixes
+
+* **oauth:** repair acknowledged empty Secret Service writes ([17b0beb](https://github.com/prjct-app/pi-mcp/commit/17b0bebfc1a6680d61917fdaf09940beed734203))
+
 ## [0.4.4](https://github.com/prjct-app/pi-mcp/compare/v0.4.3...v0.4.4) (2026-10-27)
 
 ### Bug Fixes
