@@ -9,6 +9,11 @@
 
 ### Bug Fixes
 
+- Update the development-only Node MCP adapter to 2.1.2 and its required server peer to 2.4.0, addressing GHSA-f897-62hf-6gxq without changing the production MCP client.
+
+- Repair a Linux Secret Service write that fulfills but reads back empty: repeat only the same local credential value once under the existing OAuth lock, verify it independently, and fail closed on persistent emptiness, missing/conflicting data, or native errors. Never replay OAuth registration/token requests.
+- Extend native coverage through the real Pi loader and nested tool pipeline, in addition to direct native-store tests.
+
 - Add agent `auth` for signing in or explicitly retrying a failed OAuth flow without replacing server configuration. Reuse pending links and keep failed attempts cached until an explicit retry.
 - Preserve safe credential-store and OAuth-startup diagnostics instead of hiding them behind a generic MCP error or a misleading reconnect instruction. Classify registration rejection and busy callback ports without exposing provider bodies or credentials.
 - Test agent authentication through Pi's real TypeScript loader and nested tool pipeline in a separate process without `tsx`, with isolated credentials and offline OAuth fixtures.
