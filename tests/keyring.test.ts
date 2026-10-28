@@ -7,7 +7,9 @@ import { oauthFixture } from './fixtures/oauth.ts';
 function nativeFixture() {
   const data = new Map<string, string>();
   const calls: { service: string; username: string; options: EntryOptions }[] = [];
-  const failures: { read?: Error; write?: Error; delete?: Error; readAfterDelete?: Error; dropDelete?: boolean } = {};
+  const writes: string[] = [];
+  const failures: { read?: Error; write?: Error; delete?: Error; readAfterDelete?: Error; dropDelete?: boolean;
+    emptyWrites?: number; dropWrites?: boolean; conflictingWrite?: string; readAfterWrite?: Error } = {};
   class Entry implements KeyringEntry {
     constructor(service: string, private readonly username: string, options: EntryOptions) { calls.push({ service, username, options }); }
     async getPassword() {
@@ -15,8 +17,11 @@ function nativeFixture() {
       return data.get(this.username) ?? null;
     }
     async setPassword(value: string) {
+      writes.push(value);
       if (failures.write) throw failures.write;
-      data.set(this.username, value);
+      if (failures.emptyWrites) { failures.emptyWrites--; data.set(this.username, ''); }
+      else if (!failures.dropWrites) data.set(this.username, failures.conflictingWrite ?? value);
+      if (failures.readAfterWrite) failures.read = failures.readAfterWrite;
     }
     async deleteCredential() {
       if (failures.delete) throw failures.delete;
@@ -26,7 +31,7 @@ function nativeFixture() {
     }
   }
   const load: KeyringLoader = async () => ({ AsyncEntry: Entry });
-  return { data, calls, failures, load, store: new KeyringSecrets('unused-by-native-boundary-tests', load) };
+  return { data, calls, writes, failures, load, store: new KeyringSecrets('unused-by-native-boundary-tests', load) };
 }
 
 test('native storage loads lazily and pins every independent entry to durable Secret Service without changing its identity', async () => {
@@ -39,7 +44,7 @@ test('native storage loads lazily and pins every independent entry to durable Se
   assert.equal(await nextSession.get('another-synthetic-account'), undefined);
   await nextSession.delete('synthetic-account');
   assert.equal(await fixture.store.get('synthetic-account'), undefined);
-  assert.equal(fixture.calls.length, 7);
+  assert.equal(fixture.calls.length, 8);
   for (const call of fixture.calls) {
     assert.equal(call.service, 'app.prjct.pi-mcp');
     assert.ok(['synthetic-account', 'another-synthetic-account'].includes(call.username));
@@ -94,4 +99,64 @@ test('an unavailable native store cannot be mistaken for a fresh account and cau
     assert.equal(fixture.data.size, 0);
     assert.deepEqual(oauth.requests, []);
   } finally { manager.close(); }
+});
+
+test('Linux repairs one acknowledged empty creation with the exact value, under the existing credential lock', { skip: process.platform !== 'linux' }, async () => {
+  const fixture = nativeFixture();
+  fixture.failures.emptyWrites = 1;
+  const lock: { held: boolean; calls: number } = { held: false, calls: 0 };
+  const base = fixture.store.set.bind(fixture.store);
+  const store = {
+    ...fixture.store,
+    withLock: async <T>(_key: string, action: () => Promise<T>) => {
+      assert.equal(lock.held, false); lock.held = true; lock.calls++;
+      try { return await action(); } finally { lock.held = false; }
+    },
+    get: fixture.store.get.bind(fixture.store),
+    delete: fixture.store.delete.bind(fixture.store),
+    set: async (key: string, value: string) => { assert.equal(lock.held, true); await base(key, value); },
+  };
+  const oauth = oauthFixture();
+  const manager = new OAuthManager({ remote: { url: 'https://mcp.example.test/mcp', auth: 'oauth' } }, store, oauth.fetchFn);
+  try {
+    assert.ok((await manager.start('remote')).url);
+    assert.equal(lock.calls, 1);
+    assert.equal(fixture.writes.length, 2);
+    assert.equal(fixture.writes[0], fixture.writes[1]);
+    assert.equal(oauth.requests.filter(url => url.endsWith('/register')).length, 1, 'Only a local idempotent write may be repeated, never registration');
+    assert.equal(fixture.data.values().next().value, fixture.writes[0]);
+  } finally { manager.close(); }
+});
+
+test('a persistently empty native store fails after at most two local writes and never issues a link', async () => {
+  const fixture = nativeFixture();
+  fixture.failures.emptyWrites = 10;
+  const oauth = oauthFixture();
+  const manager = new OAuthManager({ remote: { url: 'https://mcp.example.test/mcp', auth: 'oauth' } }, fixture.store, oauth.fetchFn);
+  try {
+    await assert.rejects(manager.start('remote'), /Cannot save secure MCP credentials/);
+    assert.equal(fixture.writes.length, process.platform === 'linux' ? 2 : 1);
+    assert.equal(oauth.requests.filter(url => url.endsWith('/register')).length, 1);
+  } finally { manager.close(); }
+});
+
+test('native writes never retry a missing result, conflicting value, read failure or write failure', async () => {
+  for (const failure of [
+    { dropWrites: true }, { conflictingWrite: 'different-nonempty-record' },
+    { readAfterWrite: new Error('synthetic read failure') }, { write: new Error('synthetic write failure') },
+  ]) {
+    const fixture = nativeFixture();
+    Object.assign(fixture.failures, failure);
+    await assert.rejects(fixture.store.set('synthetic-account', 'synthetic-value'));
+    assert.equal(fixture.writes.length, 1);
+  }
+});
+
+test('normal and explicitly empty values verify without a second native write', async () => {
+  for (const value of ['', 'synthetic-ñ-🔐', JSON.stringify({ version: 1, binding: 'synthetic', issuers: {} })]) {
+    const fixture = nativeFixture();
+    await fixture.store.set('synthetic-account', value);
+    assert.equal(await fixture.store.get('synthetic-account'), value);
+    assert.deepEqual(fixture.writes, [value]);
+  }
 });

@@ -10,6 +10,12 @@ pi-mcp now pins `@napi-rs/keyring` to **2.1.2** and passes `{ linux: { store: 's
 
 Issuer-bound records, service `app.prjct.pi-mcp`, credential account hashes and version-1 JSON are unchanged. State, PKCE, issuer/resource checks, credential locks, single-use code exchange and verified write readback still apply. No plaintext fallback, credential enumeration or automatic migration is added.
 
+## Acknowledged empty item creation
+
+A separate synthetic reproduction of the 0.4.4 failure, using the installed package through Pi 1.4's real loader and native Secret Service, observed a fulfilled write of a nonempty OAuth client record followed by an empty-string readback. The same flow worked in a fresh private test vault, so the original standalone/native tests did not cover this environment-dependent path. This is an observed storage-boundary failure, not a claim that the underlying daemon/binding defect has been fully diagnosed.
+
+On Linux, `KeyringSecrets.set` now verifies its write with a fresh entry. If and only if the fulfilled write reads back as an empty string instead of the intended nonempty value, it writes the exact same value once more under the OAuth caller's existing credential lock, then independently verifies it again. It does not retry a thrown write/read error, an absent entry, or conflicting nonempty data. Persistent empty readback still fails closed. This is a bounded idempotent **local credential write**, not an OAuth registration, token exchange, or MCP operation retry. Service/account identities and version-1 JSON remain unchanged; no plaintext fallback or automatic deletion is introduced.
+
 ## Platform requirements and compatibility
 
 - **Linux:** an unlocked freedesktop Secret Service (gnome-keyring, KWallet or KeePassXC) must be reachable over the Pi process's session D-Bus. Configure that service before requesting a new authorization link. A kernel keyring alone is no longer accepted as durable OAuth storage.
@@ -47,6 +53,9 @@ The native suite uses random synthetic identities and fake HTTPS responses to pr
 7. Invalid native data is an error, not a missing record; unavailable D-Bus refuses all fallback without changing stored credentials.
 8. Sign-out is verified by new entries and a new OAuth manager.
 9. The Windows CI path rejects a dedicated synthetic lock directory with an unsafe Everyone grant.
+10. The real Pi TypeScript loader and nested tool pipeline persist an OAuth client through the native store and issue a link, using only fake provider responses and a synthetic account removed afterward.
+
+Injected native-boundary tests reproduce one acknowledged empty creation and persistent empty writes. They verify exact-value repair, the two-write bound, the existing OAuth lock, one registration request only, and no retry for missing/conflicting data or native errors.
 
 Injected and callback tests additionally cover callback endpoint rediscovery, fragmented response bodies and sign-out interleavings.
 
